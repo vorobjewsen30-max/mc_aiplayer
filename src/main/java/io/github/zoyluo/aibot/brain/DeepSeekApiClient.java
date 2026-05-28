@@ -165,7 +165,7 @@ public final class DeepSeekApiClient {
         return array;
     }
 
-    private static ChatResponse parseResponse(String body) throws DeepSeekApiException {
+    static ChatResponse parseResponse(String body) throws DeepSeekApiException {
         try {
             JsonObject root = JsonParser.parseString(body).getAsJsonObject();
             JsonObject choice = root.getAsJsonArray("choices").get(0).getAsJsonObject();

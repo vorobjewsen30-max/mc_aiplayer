@@ -1,15 +1,22 @@
 package io.github.zoyluo.aibot.command;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import io.github.zoyluo.aibot.brain.BrainValidation;
 import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import net.minecraft.command.argument.MessageArgumentType;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.text.Text;
 
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
@@ -32,7 +39,41 @@ public final class AIBotBrainSubcommand {
                                         .executes(context -> say(
                                                 context.getSource(),
                                                 StringArgumentType.getString(context, "name"),
-                                                MessageArgumentType.getMessage(context, "text").getString())))));
+                                                MessageArgumentType.getMessage(context, "text").getString())))))
+                .then(literal("validate")
+                        .then(botName()
+                                .then(literal("api-failure")
+                                        .executes(context -> validateApiFailure(context.getSource(), StringArgumentType.getString(context, "name"))))
+                                .then(literal("bad-tool-args")
+                                        .executes(context -> validateBadToolArgs(context.getSource(), StringArgumentType.getString(context, "name"))))
+                                .then(literal("bad-response")
+                                        .executes(context -> validateBadResponse(context.getSource(), StringArgumentType.getString(context, "name"))))
+                                .then(literal("tps")
+                                        .then(argument("seconds", IntegerArgumentType.integer(3, 60))
+                                                .then(argument("text", MessageArgumentType.message())
+                                                        .executes(context -> validateTps(
+                                                                context.getSource(),
+                                                                StringArgumentType.getString(context, "name"),
+                                                                IntegerArgumentType.getInteger(context, "seconds"),
+                                                                MessageArgumentType.getMessage(context, "text").getString()))))))
+                        .then(literal("api-failure")
+                                .then(botName()
+                                        .executes(context -> validateApiFailure(context.getSource(), StringArgumentType.getString(context, "name")))))
+                        .then(literal("bad-tool-args")
+                                .then(botName()
+                                        .executes(context -> validateBadToolArgs(context.getSource(), StringArgumentType.getString(context, "name")))))
+                        .then(literal("bad-response")
+                                .then(botName()
+                                        .executes(context -> validateBadResponse(context.getSource(), StringArgumentType.getString(context, "name")))))
+                        .then(literal("tps")
+                                .then(botName()
+                                        .then(argument("seconds", IntegerArgumentType.integer(3, 60))
+                                                .then(argument("text", MessageArgumentType.message())
+                                                        .executes(context -> validateTps(
+                                                                context.getSource(),
+                                                                StringArgumentType.getString(context, "name"),
+                                                                IntegerArgumentType.getInteger(context, "seconds"),
+                                                                MessageArgumentType.getMessage(context, "text").getString())))))));
     }
 
     private static com.mojang.brigadier.builder.RequiredArgumentBuilder<ServerCommandSource, String> botName() {
@@ -74,6 +115,66 @@ public final class AIBotBrainSubcommand {
             source.sendFeedback(() -> Text.literal("[AIBot] brain request queued for " + name), false);
             return 1;
         }
+        return 0;
+    }
+
+    private static int validateApiFailure(ServerCommandSource source, String name) {
+        return reportValidation(source, getBot(source, name), BrainValidation::apiFailure);
+    }
+
+    private static int validateBadToolArgs(ServerCommandSource source, String name) {
+        return reportValidation(source, getBot(source, name), BrainValidation::badToolArgs);
+    }
+
+    private static int validateBadResponse(ServerCommandSource source, String name) {
+        return reportValidation(source, getBot(source, name), BrainValidation::badResponse);
+    }
+
+    private static int validateTps(ServerCommandSource source, String name, int seconds, String text) {
+        Optional<AIPlayerEntity> bot = getBot(source, name);
+        if (bot.isEmpty()) {
+            return 0;
+        }
+
+        MinecraftServer server = source.getServer();
+        long startTicks = server.getTicks();
+        long startNanos = System.nanoTime();
+        boolean queued = BrainCoordinator.INSTANCE.handleMessage(bot.get(), source.getName(), text);
+        CompletableFuture.delayedExecutor(seconds, TimeUnit.SECONDS).execute(() ->
+                server.execute(() -> {
+                    long elapsedTicks = server.getTicks() - startTicks;
+                    double elapsedSeconds = Math.max(0.001D, (System.nanoTime() - startNanos) / 1_000_000_000.0D);
+                    double tps = elapsedTicks / elapsedSeconds;
+                    boolean ok = tps >= 19.0D;
+                    BotLog.raw(LogCategory.API, ok ? org.slf4j.event.Level.INFO : org.slf4j.event.Level.WARN, bot.get(),
+                            "tps_validation",
+                            null,
+                            "queued", queued,
+                            "seconds", seconds,
+                            "ticks", elapsedTicks,
+                            "tps", String.format(java.util.Locale.ROOT, "%.2f", tps));
+                    source.sendFeedback(() -> Text.literal("[AIBot] TPS validation "
+                            + (ok ? "ok" : "failed")
+                            + ": queued=" + queued
+                            + ", ticks=" + elapsedTicks
+                            + ", tps=" + String.format(java.util.Locale.ROOT, "%.2f", tps)), false);
+                }));
+        source.sendFeedback(() -> Text.literal("[AIBot] TPS validation started for " + name + " over " + seconds + "s"), false);
+        return queued ? 1 : 0;
+    }
+
+    private static int reportValidation(ServerCommandSource source,
+                                        Optional<AIPlayerEntity> bot,
+                                        java.util.function.Function<AIPlayerEntity, BrainValidation.ValidationResult> validator) {
+        if (bot.isEmpty()) {
+            return 0;
+        }
+        BrainValidation.ValidationResult result = validator.apply(bot.get());
+        if (result.ok()) {
+            source.sendFeedback(() -> Text.literal("[AIBot] validation ok: " + result.scenario() + " -> " + result.message()), false);
+            return 1;
+        }
+        source.sendError(Text.literal("[AIBot] validation failed: " + result.scenario() + " -> " + result.message()));
         return 0;
     }
 
