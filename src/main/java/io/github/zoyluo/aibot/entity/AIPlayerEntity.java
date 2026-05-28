@@ -1,8 +1,8 @@
 package io.github.zoyluo.aibot.entity;
 
 import com.mojang.authlib.GameProfile;
-import io.github.zoyluo.aibot.AIBotMod;
 import io.github.zoyluo.aibot.action.ActionPack;
+import io.github.zoyluo.aibot.log.BotLog;
 import net.minecraft.network.packet.c2s.common.SyncedClientOptions;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -30,7 +30,7 @@ public class AIPlayerEntity extends ServerPlayerEntity {
             this.playerTick();
             this.actionPack.onUpdate();
         } catch (NullPointerException exception) {
-            AIBotMod.LOGGER.debug("[AIBot] swallowed NPE while ticking fake player {}", getName().getString(), exception);
+            BotLog.error(this, "tick_npe_swallowed", exception);
         }
     }
 

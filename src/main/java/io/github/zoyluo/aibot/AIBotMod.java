@@ -3,10 +3,15 @@ package io.github.zoyluo.aibot;
 import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.brain.ChatCaptureListener;
 import io.github.zoyluo.aibot.command.AIBotCommand;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.BotLogWriter;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.aibot.task.DangerWatcher;
+import io.github.zoyluo.aibot.task.TaskManager;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,22 +22,34 @@ public class AIBotMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        AIBotConfig config = AIBotConfig.load();
+        BotLogWriter.INSTANCE.start(config);
+        BotLog.lifecycle("mod_loaded", "version", getModVersion());
+        BotLog.config("config_loaded",
+                "deepseek_model", config.deepseek().model(),
+                "perception_radius", config.perception().radius(),
+                "logging_enabled", config.logging().enabled());
+
         LOGGER.info("================================");
         LOGGER.info("  AIBot v{} loaded", getModVersion());
-        AIBotConfig config = AIBotConfig.load();
-
-        LOGGER.info("  Mode: M4 DeepSeek brain");
+        LOGGER.info("  Mode: M6 structured logs over M5 tasks");
         LOGGER.info("================================");
 
         BrainCoordinator.INSTANCE.configure(config);
         ChatCaptureListener.register();
 
         ServerLifecycleEvents.SERVER_STARTED.register(server ->
-                LOGGER.info("[AIBot] Server started: {}", server.getServerMotd()));
+                BotLog.lifecycle("server_started", "motd", server.getServerMotd()));
         ServerLifecycleEvents.SERVER_STOPPING.register(server ->
-                LOGGER.info("[AIBot] Server stopping"));
+                BotLog.lifecycle("server_stopping"));
         ServerLifecycleEvents.SERVER_STOPPING.register(AIPlayerManager.INSTANCE::onServerStopping);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> BrainCoordinator.INSTANCE.shutdown());
+        ServerLifecycleEvents.SERVER_STOPPING.register(TaskManager.INSTANCE::onServerStopping);
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> BotLogWriter.INSTANCE.shutdown(3000));
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            TaskManager.INSTANCE.tickAll(server);
+            DangerWatcher.INSTANCE.scanAll(server);
+        });
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 AIBotCommand.register(dispatcher, registryAccess));
     }

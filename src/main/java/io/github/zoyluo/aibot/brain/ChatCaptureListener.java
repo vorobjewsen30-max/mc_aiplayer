@@ -1,6 +1,7 @@
 package io.github.zoyluo.aibot.brain;
 
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.aibot.log.BotLog;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 
 import java.util.regex.Pattern;
@@ -20,8 +21,10 @@ public final class ChatCaptureListener {
             }
             String targetName = matcher.group(1);
             String body = matcher.group(2);
-            AIPlayerManager.INSTANCE.getByName(targetName).ifPresent(bot ->
-                    BrainCoordinator.INSTANCE.handleMessage(bot, sender.getGameProfile().getName(), body));
+            AIPlayerManager.INSTANCE.getByName(targetName).ifPresent(bot -> {
+                BotLog.comm(bot, "chat_in", "sender", sender.getGameProfile().getName(), "text", body);
+                BrainCoordinator.INSTANCE.handleMessage(bot, sender.getGameProfile().getName(), body);
+            });
         });
     }
 }

@@ -5,7 +5,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.AIBotMod;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 
 import java.io.IOException;
 import java.net.URI;
@@ -43,6 +44,11 @@ public final class DeepSeekApiClient {
         body.addProperty("max_tokens", config.maxTokens());
         body.addProperty("temperature", config.temperature());
         body.addProperty("stream", false);
+        BotLog.api(null, "api_request",
+                "model", config.model(),
+                "msg_count", history.size(),
+                "tools_count", tools == null ? 0 : tools.size(),
+                "max_tokens", config.maxTokens());
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(normalizedBaseUrl() + "/v1/chat/completions"))
@@ -67,6 +73,7 @@ public final class DeepSeekApiClient {
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
                 int status = response.statusCode();
                 if ((status == 429 || status >= 500) && attempt < attempts) {
+                    BotLog.warn(LogCategory.API, null, "api_retry", "attempt", attempt, "reason", status, "backoff_ms", backoffMs);
                     sleep(backoffMs);
                     backoffMs *= 2;
                     continue;
@@ -74,8 +81,10 @@ public final class DeepSeekApiClient {
                 return response;
             } catch (IOException exception) {
                 if (attempt >= attempts) {
+                    BotLog.error("api_timeout", exception, "attempt", attempt);
                     throw new DeepSeekApiException("io_error: " + exception.getMessage(), exception);
                 }
+                BotLog.warn(LogCategory.API, null, "api_retry", "attempt", attempt, "reason", "io_error", "backoff_ms", backoffMs);
                 sleep(backoffMs);
                 backoffMs *= 2;
             } catch (InterruptedException exception) {
@@ -178,10 +187,14 @@ public final class DeepSeekApiClient {
             int promptTokens = intField(usage, "prompt_tokens");
             int completionTokens = intField(usage, "completion_tokens");
             int cacheHitTokens = intField(usage, "prompt_cache_hit_tokens");
-            AIBotMod.LOGGER.info("[AIBot] DeepSeek usage prompt_tokens={} completion_tokens={} cache_hit_tokens={}",
-                    promptTokens, completionTokens, cacheHitTokens);
+            BotLog.api(null, "api_response",
+                    "tokens_in", promptTokens,
+                    "tokens_out", completionTokens,
+                    "cache_hit", cacheHitTokens,
+                    "finish_reason", finishReason);
             return new ChatResponse(content, toolCalls, finishReason, promptTokens, completionTokens, cacheHitTokens);
         } catch (RuntimeException exception) {
+            BotLog.error("api_parse_error", exception, "body_excerpt", body.substring(0, Math.min(200, body.length())));
             throw new DeepSeekApiException("bad_response: " + exception.getMessage(), exception);
         }
     }

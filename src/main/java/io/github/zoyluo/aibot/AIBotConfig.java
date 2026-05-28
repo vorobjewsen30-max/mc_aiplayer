@@ -2,6 +2,8 @@ package io.github.zoyluo.aibot;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -9,11 +11,13 @@ import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 public record AIBotConfig(
         DeepSeek deepseek,
         Perception perception,
-        Brain brain
+        Brain brain,
+        Logging logging
 ) {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static AIBotConfig instance = defaults();
@@ -32,7 +36,7 @@ public record AIBotConfig(
                     loaded = parsed.withDefaults();
                 }
             } catch (IOException exception) {
-                AIBotMod.LOGGER.warn("[AIBot] Failed to read config {}, using defaults", path, exception);
+                BotLog.error("config_read_failed", exception, "path", path);
             }
         } else {
             try {
@@ -40,9 +44,9 @@ public record AIBotConfig(
                 try (Writer writer = Files.newBufferedWriter(path)) {
                     GSON.toJson(loaded, writer);
                 }
-                AIBotMod.LOGGER.warn("[AIBot] Wrote default config template to {}; set DEEPSEEK_API_KEY or deepseek.apiKey", path);
+                BotLog.config("config_template_written", "path", path);
             } catch (IOException exception) {
-                AIBotMod.LOGGER.warn("[AIBot] Failed to write default config {}", path, exception);
+                BotLog.error("config_write_failed", exception, "path", path);
             }
         }
 
@@ -51,14 +55,14 @@ public record AIBotConfig(
             loaded = loaded.withDeepSeek(loaded.deepseek().withApiKey(envKey));
         }
         if (loaded.deepseek().apiKey().isBlank()) {
-            AIBotMod.LOGGER.warn("[AIBot] DeepSeek API key not configured; M4 brain requests will fail fast");
+            BotLog.warn(LogCategory.CONFIG, null, "deepseek_key_missing");
         }
         instance = loaded;
         return loaded;
     }
 
     public AIBotConfig withDeepSeek(DeepSeek deepseek) {
-        return new AIBotConfig(deepseek, perception(), brain());
+        return new AIBotConfig(deepseek, perception(), brain(), logging());
     }
 
     private AIBotConfig withDefaults() {
@@ -66,14 +70,26 @@ public record AIBotConfig(
         return new AIBotConfig(
                 deepseek == null ? defaults.deepseek : deepseek.withDefaults(defaults.deepseek),
                 perception == null ? defaults.perception : perception.withDefaults(defaults.perception),
-                brain == null ? defaults.brain : brain.withDefaults(defaults.brain));
+                brain == null ? defaults.brain : brain.withDefaults(defaults.brain),
+                logging == null ? defaults.logging : logging.withDefaults(defaults.logging));
     }
 
     public static AIBotConfig defaults() {
         return new AIBotConfig(
                 new DeepSeek("", "https://api.deepseek.com", "deepseek-chat", 2048, 0.3D, 60, 3, 500),
                 new Perception(16, 20, 10, 10),
-                new Brain(20, 6, 5));
+                new Brain(20, 6, 5),
+                new Logging(true, "logs/aibot", true, "daily", 50, 30, true, Map.of(
+                        "LIFECYCLE", "INFO",
+                        "COMM", "INFO",
+                        "API", "INFO",
+                        "ACTION", "INFO",
+                        "PERCEPTION", "DEBUG",
+                        "PATH", "DEBUG",
+                        "TASK", "INFO",
+                        "DANGER", "INFO",
+                        "ERROR", "ERROR",
+                        "CONFIG", "INFO")));
     }
 
     public record DeepSeek(
@@ -119,6 +135,29 @@ public record AIBotConfig(
                     positiveOrDefault(maxHistoryMessages, defaults.maxHistoryMessages),
                     positiveOrDefault(maxToolCallsPerTurn, defaults.maxToolCallsPerTurn),
                     positiveOrDefault(maxTurnsPerRequest, defaults.maxTurnsPerRequest));
+        }
+    }
+
+    public record Logging(
+            boolean enabled,
+            String directory,
+            boolean perBotFile,
+            String rotation,
+            int maxFileSizeMb,
+            int maxBackups,
+            boolean mirrorToSlf4j,
+            Map<String, String> categories
+    ) {
+        Logging withDefaults(Logging defaults) {
+            return new Logging(
+                    enabled,
+                    blankToDefault(directory, defaults.directory),
+                    perBotFile,
+                    blankToDefault(rotation, defaults.rotation),
+                    positiveOrDefault(maxFileSizeMb, defaults.maxFileSizeMb),
+                    positiveOrDefault(maxBackups, defaults.maxBackups),
+                    mirrorToSlf4j,
+                    categories == null || categories.isEmpty() ? defaults.categories : categories);
         }
     }
 

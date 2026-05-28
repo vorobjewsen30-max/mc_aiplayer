@@ -1,10 +1,12 @@
 package io.github.zoyluo.aibot.brain;
 
 import io.github.zoyluo.aibot.AIBotConfig;
-import io.github.zoyluo.aibot.AIBotMod;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 import io.github.zoyluo.aibot.perception.PerceptionCollector;
 import io.github.zoyluo.aibot.perception.PerceptionSnapshot;
+import io.github.zoyluo.aibot.task.MemoryStore;
 import net.minecraft.text.Text;
 
 import java.util.ArrayDeque;
@@ -63,12 +65,11 @@ public final class BrainCoordinator {
             return;
         }
 
-        AIBotMod.LOGGER.info("[AIBot] {} <- DeepSeek finish_reason={} prompt_tokens={} completion_tokens={} cache_hit_tokens={}",
-                bot.getGameProfile().getName(),
-                response.finishReason(),
-                response.promptTokens(),
-                response.completionTokens(),
-                response.promptCacheHitTokens());
+        BotLog.api(bot, "api_response",
+                "tokens_in", response.promptTokens(),
+                "tokens_out", response.completionTokens(),
+                "cache_hit", response.promptCacheHitTokens(),
+                "finish_reason", response.finishReason());
 
         if (response.content() != null && !response.content().isBlank()) {
             broadcast(bot, "<" + bot.getGameProfile().getName() + "> " + response.content());
@@ -83,6 +84,7 @@ public final class BrainCoordinator {
             conversation.history.addAll(toolResults);
             conversation.turnsInCurrentRequest++;
             if (conversation.turnsInCurrentRequest >= AIBotConfig.get().brain().maxTurnsPerRequest()) {
+                BotLog.warn(LogCategory.COMM, bot, "max_turns_reached", "turns", conversation.turnsInCurrentRequest, "last_response", response.finishReason());
                 broadcast(bot, "<" + bot.getGameProfile().getName() + "> max turns reached.");
                 conversation.busy = false;
                 trimHistory(conversation);
@@ -95,7 +97,7 @@ public final class BrainCoordinator {
 
         conversation.busy = false;
         trimHistory(conversation);
-        AIBotMod.LOGGER.info("[AIBot] conversation turn done, finish_reason={}", response.finishReason());
+        BotLog.comm(bot, "conversation_done", "finish_reason", response.finishReason());
     }
 
     public void onError(AIPlayerEntity bot, Throwable throwable) {
@@ -104,12 +106,13 @@ public final class BrainCoordinator {
             conversation.busy = false;
         }
         String message = throwable.getMessage() == null ? throwable.getClass().getSimpleName() : throwable.getMessage();
-        AIBotMod.LOGGER.warn("[AIBot] Brain request failed for {}: {}", bot.getGameProfile().getName(), message);
+        BotLog.error(bot, "brain_hiccup", throwable, "message", message);
         broadcast(bot, "<" + bot.getGameProfile().getName() + "> brain error: " + message);
     }
 
     public void reset(AIPlayerEntity bot) {
         conversations.remove(bot.getUuid());
+        BotLog.comm(bot, "conversation_reset");
     }
 
     public void shutdown() {
@@ -138,7 +141,7 @@ public final class BrainCoordinator {
     }
 
     private void submit(AIPlayerEntity bot, BotConversation conversation) {
-        List<ChatMessage> historySnapshot = List.copyOf(conversation.history);
+        List<ChatMessage> historySnapshot = MemoryStore.INSTANCE.prepareHistory(bot, List.copyOf(conversation.history));
         List<ToolDefinition> toolsSnapshot = toolRegistry.allTools();
         executor.submit(bot, historySnapshot, toolsSnapshot, this::onResponse, this::onError);
     }

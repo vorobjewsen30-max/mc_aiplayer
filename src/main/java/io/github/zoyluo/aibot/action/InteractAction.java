@@ -1,6 +1,7 @@
 package io.github.zoyluo.aibot.action;
 
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import net.minecraft.entity.Entity;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.Vec3d;
@@ -16,6 +17,7 @@ public final class InteractAction {
         player.swingHand(Hand.MAIN_HAND);
         player.resetLastAttackedTicks();
         player.updateLastActionTime();
+        BotLog.action(player, "attack", "target_type", target.getType(), "target_id", target.getId());
         return ActionResult.SUCCESS;
     }
 

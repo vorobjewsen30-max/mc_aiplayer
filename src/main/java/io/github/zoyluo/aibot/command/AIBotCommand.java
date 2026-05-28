@@ -30,7 +30,9 @@ public final class AIBotCommand {
                 .then(literal("list")
                         .executes(context -> list(context.getSource())))
                 .then(AIBotBrainSubcommand.build())
-                .then(AIBotTestSubcommand.build(registryAccess)));
+                .then(AIBotLogSubcommand.build())
+                .then(AIBotTestSubcommand.build(registryAccess))
+                .then(AIBotTaskSubcommand.build()));
     }
 
     private static int spawn(ServerCommandSource source, String name) {

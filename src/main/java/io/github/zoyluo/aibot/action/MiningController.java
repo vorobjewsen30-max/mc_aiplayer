@@ -1,6 +1,8 @@
 package io.github.zoyluo.aibot.action;
 
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogFields;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
@@ -40,6 +42,7 @@ public final class MiningController {
         }
 
         if (!started) {
+            BotLog.action(player, "mine_start", "pos", LogFields.pos(pos), "face", face);
             player.interactionManager.processBlockBreakingAction(
                     pos,
                     PlayerActionC2SPacket.Action.START_DESTROY_BLOCK,
@@ -74,7 +77,7 @@ public final class MiningController {
         return ActionResult.IN_PROGRESS;
     }
 
-    void abort(AIPlayerEntity player) {
+    public void abort(AIPlayerEntity player) {
         if (!started) {
             return;
         }

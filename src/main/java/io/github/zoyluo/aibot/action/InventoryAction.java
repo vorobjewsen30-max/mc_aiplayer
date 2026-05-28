@@ -1,6 +1,7 @@
 package io.github.zoyluo.aibot.action;
 
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -18,6 +19,7 @@ public final class InventoryAction {
             return ActionResult.failed("slot_out_of_range");
         }
         player.getInventory().selectedSlot = slot;
+        BotLog.action(player, "select_slot", "slot", slot);
         return ActionResult.SUCCESS;
     }
 
@@ -62,6 +64,7 @@ public final class InventoryAction {
     public static ActionResult giveItem(AIPlayerEntity player, ItemStack stack) {
         boolean inserted = player.getInventory().insertStack(stack);
         player.getInventory().markDirty();
+        BotLog.action(player, "give", "item", stack.getItem(), "count", stack.getCount(), "inserted_ok", inserted);
         return inserted ? ActionResult.SUCCESS : ActionResult.failed("inventory_full");
     }
 
@@ -75,6 +78,7 @@ public final class InventoryAction {
             return ActionResult.failed("empty_slot");
         }
         player.dropItem(removed, false, true);
+        BotLog.action(player, "drop", "slot", slot, "whole_stack", wholeStack);
         return ActionResult.SUCCESS;
     }
 

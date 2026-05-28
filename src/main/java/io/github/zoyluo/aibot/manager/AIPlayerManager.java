@@ -1,10 +1,12 @@
 package io.github.zoyluo.aibot.manager;
 
 import com.mojang.authlib.GameProfile;
-import io.github.zoyluo.aibot.AIBotMod;
 import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogFields;
 import io.github.zoyluo.aibot.network.FakeClientConnection;
+import io.github.zoyluo.aibot.task.TaskManager;
 import io.github.zoyluo.aibot.util.OfflineProfileFactory;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributes;
@@ -65,7 +67,7 @@ public final class AIPlayerManager {
 
         players.put(player.getUuid(), player);
         nameIndex.put(normalizedName, player.getUuid());
-        AIBotMod.LOGGER.info("[AIBot] Spawned fake player {}", name);
+        BotLog.lifecycle(player, "bot_spawned", "pos", LogFields.pos(player.getBlockPos()), "mode", gameMode.getName());
         return Optional.of(player);
     }
 
@@ -78,6 +80,7 @@ public final class AIPlayerManager {
         AIPlayerEntity entity = player.get();
         entity.getActionPack().stopAll();
         BrainCoordinator.INSTANCE.reset(entity);
+        TaskManager.INSTANCE.onBotDespawn(entity);
         players.remove(entity.getUuid());
         nameIndex.remove(normalizeName(name));
         if (entity.networkHandler != null) {
@@ -85,13 +88,17 @@ public final class AIPlayerManager {
         } else {
             server.getPlayerManager().remove(entity);
         }
-        AIBotMod.LOGGER.info("[AIBot] Despawned fake player {}", name);
+        BotLog.lifecycle(entity, "bot_despawned", "reason", "command_or_shutdown");
         return true;
     }
 
     public Optional<AIPlayerEntity> getByName(String name) {
         UUID uuid = nameIndex.get(normalizeName(name));
         return uuid == null ? Optional.empty() : Optional.ofNullable(players.get(uuid));
+    }
+
+    public Optional<AIPlayerEntity> getByUuid(UUID uuid) {
+        return Optional.ofNullable(players.get(uuid));
     }
 
     public Collection<AIPlayerEntity> all() {
@@ -105,7 +112,7 @@ public final class AIPlayerManager {
         }
         players.clear();
         nameIndex.clear();
-        AIBotMod.LOGGER.info("[AIBot] AIPlayerManager.onServerStopping cleared {} bot(s)", count);
+        BotLog.lifecycle("all_bots_cleared", "count", count);
     }
 
     private static String normalizeName(String name) {

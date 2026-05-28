@@ -7,6 +7,15 @@ import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.action.LookAction;
 import io.github.zoyluo.aibot.action.MiningAction;
 import io.github.zoyluo.aibot.action.MovementAction;
+import io.github.zoyluo.aibot.task.BlueprintLoader;
+import io.github.zoyluo.aibot.task.BuildTask;
+import io.github.zoyluo.aibot.task.ForageTask;
+import io.github.zoyluo.aibot.task.MineTask;
+import io.github.zoyluo.aibot.task.MoveTask;
+import io.github.zoyluo.aibot.task.Task;
+import io.github.zoyluo.aibot.task.TaskManager;
+import io.github.zoyluo.aibot.task.TaskStatus;
+import net.minecraft.block.Block;
 import net.minecraft.entity.Entity;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.Identifier;
@@ -50,9 +59,17 @@ public final class ToolRegistry {
             return ok("looked");
         });
 
-        register("move_to", "Walk in a straight line to a coordinate. Fails if blocked.", xyzSchema(), (bot, args) -> {
-            MovementAction.startWalkTo(bot, new Vec3d(requiredInt(args, "x") + 0.5D, requiredInt(args, "y"), requiredInt(args, "z") + 0.5D));
-            return ok("started");
+        register("move_to", "Pathfind to a coordinate. Falls back to straight-line walking if pathfinding fails.", xyzSchema(), (bot, args) -> {
+            BlockPos goal = blockPos(args);
+            io.github.zoyluo.aibot.action.ActionResult pathResult = MovementAction.startPathTo(bot, goal);
+            if (pathResult.isInProgress() || pathResult.isSuccess()) {
+                return ok("pathfinding_started");
+            }
+            io.github.zoyluo.aibot.action.ActionResult fallback = MovementAction.startWalkTo(bot, Vec3d.ofCenter(goal));
+            if (fallback.isInProgress() || fallback.isSuccess()) {
+                return ok("fallback_walk_started: " + pathResult.reason());
+            }
+            return fail("path_and_walk_both_failed: " + pathResult.reason());
         });
 
         register("mine_block", "Break the block at given coords. Bot must already be within reach.", xyzSchema(), (bot, args) -> {
@@ -93,6 +110,59 @@ public final class ToolRegistry {
             MovementAction.stopAll(bot);
             return ok("stopped");
         });
+
+        register("assign_task", "Start a high-level task for the bot. Supersedes any current task. Build params: blueprint plus anchor_x/anchor_y/anchor_z. x/y/z aliases are accepted.", objectSchema()
+                .property("task_type", stringSchema("move, forage, mine, or build"))
+                .property("params", objectSchema().build())
+                .required("task_type")
+                .required("params")
+                .build(), (bot, args) -> {
+            Task task = createTask(bot, requiredString(args, "task_type"), args.getAsJsonObject("params"));
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("get_task_status", "Get the current task status", objectSchema().build(), (bot, args) -> {
+            TaskStatus status = TaskManager.INSTANCE.status(bot);
+            return ok("{\"name\":\"" + escape(status.name())
+                    + "\",\"state\":\"" + status.state()
+                    + "\",\"progress\":" + status.progress()
+                    + ",\"description\":\"" + escape(status.description()) + "\"}");
+        });
+
+        register("abort_task", "Cancel the current task", objectSchema().build(), (bot, args) -> {
+            TaskManager.INSTANCE.abort(bot);
+            return ok("aborted");
+        });
+    }
+
+    private static Task createTask(io.github.zoyluo.aibot.entity.AIPlayerEntity bot, String taskType, JsonObject params) {
+        if (params == null) {
+            throw new IllegalArgumentException("missing_or_bad_arg: params");
+        }
+        return switch (taskType) {
+            case "move" -> new MoveTask(bot, new BlockPos(requiredInt(params, "x"), requiredInt(params, "y"), requiredInt(params, "z")));
+            case "forage" -> new ForageTask(
+                    Registries.ENTITY_TYPE.get(Identifier.of(requiredString(params, "entity_type"))),
+                    optionalInt(params, "count", 1));
+            case "mine" -> {
+                Block block = Registries.BLOCK.get(Identifier.of(requiredString(params, "block")));
+                yield new MineTask(block, optionalInt(params, "count", 1));
+            }
+            case "build" -> {
+                try {
+                    yield new BuildTask(
+                            BlueprintLoader.load(requiredString(params, "blueprint")),
+                            new BlockPos(
+                                    intWithAlias(params, "anchor_x", "x"),
+                                    intWithAlias(params, "anchor_y", "y"),
+                                    intWithAlias(params, "anchor_z", "z")));
+                } catch (java.io.IOException exception) {
+                    throw new IllegalArgumentException(exception.getMessage(), exception);
+                }
+            }
+            default -> throw new IllegalArgumentException("unknown_task_type: " + taskType);
+        };
     }
 
     private void register(String name, String description, JsonObject schema, ToolDefinition.Handler handler) {
@@ -125,11 +195,32 @@ public final class ToolRegistry {
         return args.get(name).getAsInt();
     }
 
+    private static int intWithAlias(JsonObject args, String primary, String alias) {
+        if (args.has(primary) && args.get(primary).isJsonPrimitive()) {
+            return args.get(primary).getAsInt();
+        }
+        if (args.has(alias) && args.get(alias).isJsonPrimitive()) {
+            return args.get(alias).getAsInt();
+        }
+        throw new IllegalArgumentException("missing_or_bad_arg: " + primary);
+    }
+
     private static String requiredString(JsonObject args, String name) {
         if (!args.has(name) || !args.get(name).isJsonPrimitive()) {
             throw new IllegalArgumentException("missing_or_bad_arg: " + name);
         }
         return args.get(name).getAsString();
+    }
+
+    private static int optionalInt(JsonObject args, String name, int defaultValue) {
+        if (!args.has(name) || !args.get(name).isJsonPrimitive()) {
+            return defaultValue;
+        }
+        return args.get(name).getAsInt();
+    }
+
+    private static String escape(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private static JsonObject xyzSchema() {

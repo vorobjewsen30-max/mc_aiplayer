@@ -3,6 +3,7 @@ package io.github.zoyluo.aibot.brain;
 import com.google.gson.JsonObject;
 import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,6 +26,7 @@ public final class ActionDispatcher {
             } else {
                 result = invoke(bot, call);
             }
+            BotLog.action(bot, "tool_result", "tool", call.name(), "ok", result.ok(), "message", result.message());
             results.add(ChatMessage.toolResult(call.id(), result.toToolContent()));
         }
         return results;
@@ -35,8 +37,10 @@ public final class ActionDispatcher {
             ToolDefinition definition = registry.get(call.name())
                     .orElseThrow(() -> new IllegalArgumentException("unknown_tool: " + call.name()));
             JsonObject args = call.parsedArguments();
+            BotLog.action(bot, "tool_dispatch", "tool", call.name(), "args", args);
             return definition.handler().invoke(bot, args);
         } catch (Throwable throwable) {
+            BotLog.error(bot, "tool_exception", throwable, "tool", call.name());
             return new ToolDefinition.ToolResult(false, "exception: " + throwable.getMessage());
         }
     }

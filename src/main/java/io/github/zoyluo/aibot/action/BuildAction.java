@@ -1,6 +1,9 @@
 package io.github.zoyluo.aibot.action;
 
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogFields;
+import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -15,6 +18,7 @@ public final class BuildAction {
     public static ActionResult placeBlock(AIPlayerEntity player, BlockPos against, Direction face, Hand hand) {
         ItemStack stack = player.getStackInHand(hand);
         if (stack.isEmpty()) {
+            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.ERROR, player, "place_failed", "reason", "empty_hand");
             return ActionResult.failed("empty_hand");
         }
 
@@ -33,23 +37,56 @@ public final class BuildAction {
         if (result.isAccepted()) {
             player.swingHand(hand);
             player.updateLastActionTime();
+            BotLog.action(player, "place", "pos", LogFields.pos(against.offset(face)), "face", face, "item", stack.getItem());
             return ActionResult.SUCCESS;
         }
+        BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.ERROR, player, "place_failed", "pos", LogFields.pos(against.offset(face)), "reason", result.getClass().getSimpleName());
         return ActionResult.failed("interact_block_" + result.getClass().getSimpleName());
     }
 
     public static ActionResult placeBlockAt(AIPlayerEntity player, BlockPos pos) {
+        ActionResult lastFailure = ActionResult.failed("no_adjacent_block");
         BlockPos below = pos.down();
         if (!player.getServerWorld().getBlockState(below).isAir()) {
-            return placeBlock(player, below, Direction.UP, Hand.MAIN_HAND);
+            ActionResult result = placeBlock(player, below, Direction.UP, Hand.MAIN_HAND);
+            if (result.isSuccess()) {
+                return result;
+            }
+            lastFailure = result;
         }
 
         for (Direction direction : Direction.values()) {
             BlockPos against = pos.offset(direction.getOpposite());
             if (!player.getServerWorld().getBlockState(against).isAir()) {
-                return placeBlock(player, against, direction, Hand.MAIN_HAND);
+                ActionResult result = placeBlock(player, against, direction, Hand.MAIN_HAND);
+                if (result.isSuccess()) {
+                    return result;
+                }
+                lastFailure = result;
             }
         }
-        return ActionResult.failed("no_adjacent_block");
+        ActionResult fallback = directPlaceFallback(player, pos, Hand.MAIN_HAND);
+        if (fallback.isSuccess()) {
+            return fallback;
+        }
+        return lastFailure;
+    }
+
+    private static ActionResult directPlaceFallback(AIPlayerEntity player, BlockPos pos, Hand hand) {
+        ItemStack stack = player.getStackInHand(hand);
+        if (!(stack.getItem() instanceof BlockItem blockItem)) {
+            return ActionResult.failed("not_block_item");
+        }
+        if (!player.getServerWorld().getBlockState(pos).isAir()) {
+            return ActionResult.failed("target_not_air");
+        }
+        player.getServerWorld().setBlockState(pos, blockItem.getBlock().getDefaultState(), 3);
+        if (!player.getAbilities().creativeMode) {
+            stack.decrement(1);
+        }
+        player.swingHand(hand);
+        player.updateLastActionTime();
+        BotLog.action(player, "place_fallback", "pos", LogFields.pos(pos), "item", stack.getItem());
+        return ActionResult.SUCCESS;
     }
 }

@@ -15,6 +15,8 @@ import io.github.zoyluo.aibot.action.MiningAction;
 import io.github.zoyluo.aibot.action.MovementAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
+import io.github.zoyluo.aibot.pathfinding.PathfindingResult;
 import net.minecraft.command.CommandRegistryAccess;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.command.argument.ItemStackArgumentType;
@@ -52,6 +54,21 @@ public final class AIBotTestSubcommand {
                                         .then(argument("y", DoubleArgumentType.doubleArg())
                                                 .then(argument("z", DoubleArgumentType.doubleArg())
                                                         .executes(AIBotTestSubcommand::moveTo))))))
+                .then(literal("pathfind")
+                        .then(botName()
+                                .then(argument("x", IntegerArgumentType.integer())
+                                        .then(argument("y", IntegerArgumentType.integer())
+                                                .then(argument("z", IntegerArgumentType.integer())
+                                                        .executes(AIBotTestSubcommand::pathFind))))))
+                .then(literal("pathto")
+                        .then(botName()
+                                .then(argument("x", IntegerArgumentType.integer())
+                                        .then(argument("y", IntegerArgumentType.integer())
+                                                .then(argument("z", IntegerArgumentType.integer())
+                                                        .executes(AIBotTestSubcommand::pathTo))))))
+                .then(literal("cancelpath")
+                        .then(botName()
+                                .executes(AIBotTestSubcommand::stop)))
                 .then(literal("stop")
                         .then(botName()
                                 .executes(AIBotTestSubcommand::stop)))
@@ -113,6 +130,34 @@ public final class AIBotTestSubcommand {
         MovementAction.startWalkTo(bot.get(), target);
         context.getSource().sendFeedback(() -> Text.literal("[AIBot] moveto started"), false);
         return 1;
+    }
+
+    private static int pathFind(CommandContext<ServerCommandSource> context) {
+        Optional<AIPlayerEntity> bot = getBot(context);
+        if (bot.isEmpty()) {
+            return 0;
+        }
+        AIPlayerEntity player = bot.get();
+        PathfindingResult result = new AStarPathfinder(player.getServerWorld(), player.getBlockPos(), getBlockPos(context)).findPath();
+        String message = "[AIBot] pathfind success=" + result.success()
+                + ", reason=" + result.reason()
+                + ", nodes=" + result.nodesExplored()
+                + ", ms=" + result.elapsedMs()
+                + ", length=" + result.path().size();
+        if (result.success()) {
+            context.getSource().sendFeedback(() -> Text.literal(message), false);
+            return 1;
+        }
+        context.getSource().sendError(Text.literal(message));
+        return 0;
+    }
+
+    private static int pathTo(CommandContext<ServerCommandSource> context) {
+        Optional<AIPlayerEntity> bot = getBot(context);
+        if (bot.isEmpty()) {
+            return 0;
+        }
+        return sendResult(context.getSource(), "pathto", MovementAction.startPathTo(bot.get(), getBlockPos(context)));
     }
 
     private static int stop(CommandContext<ServerCommandSource> context) {

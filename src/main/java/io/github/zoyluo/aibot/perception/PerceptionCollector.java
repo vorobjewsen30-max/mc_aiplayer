@@ -3,6 +3,8 @@ package io.github.zoyluo.aibot.perception;
 import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogFields;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
@@ -21,6 +23,7 @@ public final class PerceptionCollector {
     }
 
     public static PerceptionSnapshot collect(AIPlayerEntity bot) {
+        long started = System.currentTimeMillis();
         AIBotConfig.Perception config = AIBotConfig.get().perception();
         ServerWorld world = bot.getServerWorld();
         BlockPos center = bot.getBlockPos();
@@ -35,11 +38,27 @@ public final class PerceptionCollector {
                 Registries.ITEM.getId(bot.getMainHandStack().getItem()).toString(),
                 InventoryAction.summarize(bot));
 
+        List<PerceptionSnapshot.NearbyBlock> blocks = collectBlocks(world, center, Math.min(config.radius(), 4), config.maxBlocks());
+        List<PerceptionSnapshot.NearbyEntity> entities = collectEntities(bot, world, config.radius(), config.maxEntities());
+        List<PerceptionSnapshot.NearbyItem> items = collectItems(bot, world, config.radius(), config.maxItems());
+        long elapsed = System.currentTimeMillis() - started;
+        BotLog.perception(bot, "snapshot",
+                "hp", bot.getHealth(),
+                "hunger", bot.getHungerManager().getFoodLevel(),
+                "pos", LogFields.pos(center),
+                "holding", Registries.ITEM.getId(bot.getMainHandStack().getItem()),
+                "blocks_n", blocks.size(),
+                "entities_n", entities.size(),
+                "items_n", items.size(),
+                "light", world.getLightLevel(center));
+        if (elapsed > 10L) {
+            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.PERCEPTION, bot, "snapshot_slow", "elapsed_ms", elapsed);
+        }
         return new PerceptionSnapshot(
                 self,
-                collectBlocks(world, center, Math.min(config.radius(), 4), config.maxBlocks()),
-                collectEntities(bot, world, config.radius(), config.maxEntities()),
-                collectItems(bot, world, config.radius(), config.maxItems()),
+                blocks,
+                entities,
+                items,
                 new PerceptionSnapshot.TimeInfo(world.getTimeOfDay() % 24000L, world.isDay(), world.getLightLevel(center)));
     }
 
