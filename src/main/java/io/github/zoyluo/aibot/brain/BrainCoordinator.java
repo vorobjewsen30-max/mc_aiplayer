@@ -4,6 +4,7 @@ import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.LogCategory;
+import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.observe.ReplayRecorder;
 import io.github.zoyluo.aibot.observe.TpsGuard;
 import io.github.zoyluo.aibot.network.AIBotServerNetworking;
@@ -11,6 +12,7 @@ import io.github.zoyluo.aibot.perception.PerceptionCollector;
 import io.github.zoyluo.aibot.perception.PerceptionSnapshot;
 import io.github.zoyluo.aibot.task.MemoryStore;
 import io.github.zoyluo.aibot.task.TaskManager;
+import io.github.zoyluo.aibot.task.TaskStatus;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -28,6 +30,7 @@ public final class BrainCoordinator {
 
     private final Map<UUID, BotConversation> conversations = new ConcurrentHashMap<>();
     private final Map<UUID, Boolean> manualModes = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> nextGoalWakeTick = new ConcurrentHashMap<>();
     private ToolRegistry toolRegistry = new ToolRegistry();
     private ActionDispatcher dispatcher = new ActionDispatcher(toolRegistry);
     private AsyncDecisionExecutor executor;
@@ -143,7 +146,13 @@ public final class BrainCoordinator {
     }
 
     public boolean maybeWakeForFailure(AIPlayerEntity bot) {
-        if (TaskManager.INSTANCE.peekFailure(bot).isEmpty()) {
+        return maybeWakeForFailureOrGoal(bot);
+    }
+
+    public boolean maybeWakeForFailureOrGoal(AIPlayerEntity bot) {
+        boolean hasFailure = TaskManager.INSTANCE.peekFailure(bot).isPresent();
+        boolean hasGoal = BotMemoryStore.INSTANCE.of(bot.getUuid()).hasActiveGoal();
+        if (!hasFailure && !shouldWakeForGoal(bot, hasGoal)) {
             return false;
         }
         ensureConfigured();
@@ -160,13 +169,21 @@ public final class BrainCoordinator {
         conversation.turnsInCurrentRequest = 0;
         conversation.continuationTaskPolls = 0;
         conversation.maxTurnsHintInjected = false;
-        if (!maybeInjectFailure(bot, conversation)) {
-            conversation.busy = false;
-            return false;
+        if (hasFailure && maybeInjectFailure(bot, conversation)) {
+            trimHistory(conversation);
+            submit(bot, conversation);
+            return true;
         }
-        trimHistory(conversation);
-        submit(bot, conversation);
-        return true;
+        if (hasGoal && maybeInjectGoalContinuation(bot, conversation, "当前没有正在执行的任务,但还有长期目标未完成。请继续推进当前步骤;需要时先分配一个高层任务。")) {
+            nextGoalWakeTick.put(bot.getUuid(), bot.getServer().getTicks() + 200);
+            trimHistory(conversation);
+            submit(bot, conversation);
+            return true;
+        }
+        synchronized (conversation) {
+            conversation.busy = false;
+        }
+        return false;
     }
 
     public void shutdown() {
@@ -176,6 +193,7 @@ public final class BrainCoordinator {
         }
         conversations.clear();
         manualModes.clear();
+        nextGoalWakeTick.clear();
     }
 
     public BrainStatus status(AIPlayerEntity bot) {
@@ -227,6 +245,13 @@ public final class BrainCoordinator {
                     }
                     conversation.continuationTaskPolls = 0;
                     if (maybeInjectFailure(bot, conversation)) {
+                        trimHistory(conversation);
+                        submit(bot, conversation);
+                        return;
+                    }
+                    TaskStatus status = TaskManager.INSTANCE.status(bot);
+                    if (status.state() == io.github.zoyluo.aibot.task.TaskState.COMPLETED
+                            && maybeInjectGoalContinuation(bot, conversation, "上一步任务已完成:" + status.description() + "。请根据长期目标推进下一步;如果该步骤已完成,先调用 advance_goal。")) {
                         trimHistory(conversation);
                         submit(bot, conversation);
                         return;
@@ -300,6 +325,29 @@ public final class BrainCoordinator {
                     return true;
                 })
                 .orElse(false);
+    }
+
+    private boolean maybeInjectGoalContinuation(AIPlayerEntity bot, BotConversation conversation, String reason) {
+        String goal = BotMemoryStore.INSTANCE.of(bot.getUuid()).goalDriveStatus("");
+        if (goal.isBlank()) {
+            return false;
+        }
+        PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
+        conversation.lastPerceptionDigest = perceptionDigest(snapshot);
+        conversation.history.add(ChatMessage.user(reason
+                + "\n\n长期目标状态:\n"
+                + goal
+                + "\n\nCurrent state:\n"
+                + snapshot.toJson()));
+        BotLog.comm(bot, "goal_continuation_injected", "reason", reason);
+        return true;
+    }
+
+    private boolean shouldWakeForGoal(AIPlayerEntity bot, boolean hasGoal) {
+        if (!hasGoal) {
+            return false;
+        }
+        return bot.getServer().getTicks() >= nextGoalWakeTick.getOrDefault(bot.getUuid(), 0);
     }
 
     private static String perceptionDigest(PerceptionSnapshot snapshot) {

@@ -82,6 +82,32 @@ public final class BotMemory {
                 + ": " + current + suffix;
     }
 
+    public boolean hasActiveGoal() {
+        return currentGoalStep().isPresent();
+    }
+
+    public String goalDriveStatus(String lastResult) {
+        if (goalSteps.isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        builder.append("Goal: ").append(goalTitle.isBlank() ? "(untitled)" : goalTitle).append("\n");
+        builder.append("- progress: ").append(Math.min(goalCursor, goalSteps.size())).append("/").append(goalSteps.size()).append(" completed\n");
+        builder.append("- current_step: ").append(currentGoalStep().orElse("complete")).append("\n");
+        int index = 0;
+        int remaining = 0;
+        for (String step : goalSteps) {
+            if (index++ >= goalCursor) {
+                remaining++;
+            }
+        }
+        builder.append("- remaining_steps: ").append(remaining).append("\n");
+        if (lastResult != null && !lastResult.isBlank()) {
+            builder.append("- last_result: ").append(lastResult.trim()).append("\n");
+        }
+        return builder.toString().trim();
+    }
+
     public Optional<String> currentGoalStep() {
         if (goalCursor < 0 || goalCursor >= goalSteps.size()) {
             return Optional.empty();
@@ -114,7 +140,7 @@ public final class BotMemory {
             }
         }
         if (!goalSteps.isEmpty()) {
-            builder.append("Long-term goal:\n- ").append(goalStatus("")).append("\n");
+            builder.append("Long-term goal:\n").append(goalDriveStatus("")).append("\n");
         }
         if (!facts.isEmpty()) {
             builder.append("Remembered facts:\n");

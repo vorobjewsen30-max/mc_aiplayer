@@ -60,7 +60,7 @@ public final class DangerWatcher {
             if (maybeStartNightTask(server, bot, active)) {
                 continue;
             }
-            if (active.isEmpty() && BrainCoordinator.INSTANCE.maybeWakeForFailure(bot)) {
+            if (active.isEmpty() && BrainCoordinator.INSTANCE.maybeWakeForFailureOrGoal(bot)) {
                 continue;
             }
             if (active.isEmpty() && TaskManager.INSTANCE.hasPaused(bot)) {
