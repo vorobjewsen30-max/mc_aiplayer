@@ -157,7 +157,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 **改动**:Follow 持续路径到玩家 reach(半径滞回 + 限频重算);Hold `stopAll` 待命(威胁仍交 DangerWatcher);Guard 守护点,敌近**内联**战斗(复用 helper,不 assign,G1)。目标玩家默认 = 指令发起者/owner。
 **验收**:`follow` 跟随保持 2–4 格;`hold` 不动;`guard` 守位打怪打完回位。
 
-## WO-RL-18 · 战斗强化(盾/弓/撤退治疗/装备升级)  (PLAN §RL-18)
+## WO-RL-18 · 战斗强化(盾/弓/撤退治疗/装备升级)  (PLAN §RL-18) ✅ done: CombatTask 增 RANGED/BLOCK/HEAL 与撤退治疗内联, EquipAction 支持弓箭选择和副手盾, compileJava/compileClientJava 通过。
 **文件**:`action/EquipAction`(`bestRangedSlot` + 装盾副手)、`task/CombatTask`(`RANGED`/`BLOCK`/`HEAL` 阶段 + 距离决策 + 撤退治疗内联)
 **改动**:远(>近战阈值)用弓蓄力、近用剑、危急副手盾格挡;HP≤阈值 → 退到安全 + 内联 `EatAction` 回血再战;开战前 `equipBestArmor`。**先做 装备升级+盾+撤退治疗(稳),弓为增强**。
 **约束**:`⚠️VERIFY` 弓蓄力 `useItem` / `PersistentProjectileEntity`。

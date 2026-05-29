@@ -8,6 +8,7 @@ import net.minecraft.entity.attribute.EntityAttributeModifier;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.registry.entry.RegistryEntry;
 
 import java.util.EnumMap;
@@ -82,6 +83,39 @@ public final class EquipAction {
             }
         }
         return bestSlot < 0 ? OptionalInt.empty() : OptionalInt.of(bestSlot);
+    }
+
+    public static OptionalInt bestRangedSlot(AIPlayerEntity bot) {
+        if (InventoryAction.countItem(bot, Items.ARROW) <= 0) {
+            return OptionalInt.empty();
+        }
+        PlayerInventory inventory = bot.getInventory();
+        for (int slot = 0; slot < inventory.main.size(); slot++) {
+            if (inventory.main.get(slot).isOf(Items.BOW)) {
+                return OptionalInt.of(slot);
+            }
+        }
+        return OptionalInt.empty();
+    }
+
+    public static boolean equipShieldOffhand(AIPlayerEntity bot) {
+        if (bot.getOffHandStack().isOf(Items.SHIELD)) {
+            return true;
+        }
+        PlayerInventory inventory = bot.getInventory();
+        for (int slot = 0; slot < inventory.main.size(); slot++) {
+            ItemStack stack = inventory.main.get(slot);
+            if (!stack.isOf(Items.SHIELD)) {
+                continue;
+            }
+            ItemStack oldOffhand = bot.getOffHandStack().copy();
+            bot.equipStack(EquipmentSlot.OFFHAND, stack.copy());
+            inventory.main.set(slot, oldOffhand);
+            inventory.markDirty();
+            BotLog.action(bot, "equip_shield_offhand", "source_slot", slot);
+            return true;
+        }
+        return false;
     }
 
     public static double attackDamage(ItemStack stack) {
