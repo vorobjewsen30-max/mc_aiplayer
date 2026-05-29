@@ -133,7 +133,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 **改动**:`set_base` 记当前坐标为 "base";`deposit_all` 扫 base 半径内容器,按"就近填充 + 同类聚拢"分配存入(`ContainerAction`,G3),逐栈/帧。
 **验收**:`set_base` → 采一堆杂物 → `deposit_all` → 自动入 base 附近箱。
 
-## WO-RL-14 · 自动补给(工具/食物耗尽)  (PLAN §RL-14)
+## WO-RL-14 · 自动补给(工具/食物耗尽)  (PLAN §RL-14) ✅ done: DangerWatcher/BotTickCoordinator 扫描链路触发 ResupplyTask, 可回 base 取/造工具和食物并恢复暂停任务, compileJava/compileClientJava 通过。
 **文件**:`maybeResupply`(并入 RL-9 的 BotTickCoordinator)、新 `task/ResupplyTask`
 **改动**:主工具 `getDamage()` 近 `getMaxDamage()`(<10%)或 无食物且饿 → `pauseFor` 原任务 + `ResupplyTask`(回 base→`withdraw` 或 `CraftingHelper.applyCraft` 现造)→ 完成后 `resumeFromPause`/RL-1 恢复。
 **验收**:铁镐快断 → 回 base 换镐续挖;饿且无食物 → 回 base 取食物吃。

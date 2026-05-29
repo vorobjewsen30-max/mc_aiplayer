@@ -11,6 +11,8 @@ import net.minecraft.block.BlockState;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.CreeperEntity;
 import net.minecraft.entity.mob.HostileEntity;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.math.BlockPos;
@@ -25,6 +27,7 @@ public final class DangerWatcher {
     public static final DangerWatcher INSTANCE = new DangerWatcher();
     private final Map<UUID, Integer> nextThreatAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextEatAttemptTick = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> nextResupplyAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> nextNightAttemptTick = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> observedSleepCompletionTicks = new ConcurrentHashMap<>();
 
@@ -59,6 +62,9 @@ public final class DangerWatcher {
                 return true;
             }
         }
+        if (maybeResupply(server, bot, active)) {
+            return true;
+        }
         if (maybeEat(server, bot, active)) {
             return true;
         }
@@ -73,6 +79,43 @@ public final class DangerWatcher {
             return true;
         }
         return false;
+    }
+
+    private boolean maybeResupply(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
+        if (active.isPresent() && active.get() instanceof ResupplyTask) {
+            return true;
+        }
+        if (active.isPresent() && (active.get() instanceof EvadeTask || active.get() instanceof CombatTask || active.get() instanceof EatTask)) {
+            return false;
+        }
+        int now = server.getTicks();
+        if (now < nextResupplyAttemptTick.getOrDefault(bot.getUuid(), 0)) {
+            return false;
+        }
+
+        ResupplyTask task = null;
+        ItemStack mainHand = bot.getMainHandStack();
+        if (isNearlyBroken(mainHand)) {
+            Item item = mainHand.getItem();
+            task = ResupplyTask.tool(item);
+        } else {
+            AIBotConfig.Survival survival = AIBotConfig.get().survival();
+            if (bot.getHungerManager().getFoodLevel() <= survival.hungerEatThreshold()
+                    && InventoryAction.findFoodSlot(bot) < 0) {
+                task = ResupplyTask.food();
+            }
+        }
+
+        if (task == null) {
+            return false;
+        }
+        if (active.isPresent()) {
+            TaskManager.INSTANCE.pauseFor(bot, "resupply");
+        }
+        TaskManager.INSTANCE.assign(bot, task);
+        nextResupplyAttemptTick.put(bot.getUuid(), now + 200);
+        BotLog.danger(bot, "resupply_started", "need", task.describe());
+        return true;
     }
 
     private boolean maybeEat(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {
@@ -200,6 +243,17 @@ public final class DangerWatcher {
             return 100;
         }
         return task instanceof EvadeTask ? 80 : 40;
+    }
+
+    private static boolean isNearlyBroken(ItemStack stack) {
+        if (stack.isEmpty() || !stack.isDamageable()) {
+            return false;
+        }
+        int max = stack.getMaxDamage();
+        if (max <= 0) {
+            return false;
+        }
+        return max - stack.getDamage() <= max * 0.10D;
     }
 
     private static Optional<Threat> collectTopThreat(AIPlayerEntity bot) {

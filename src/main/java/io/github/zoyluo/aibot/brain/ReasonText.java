@@ -28,7 +28,10 @@ public final class ReasonText {
             Map.entry("no_base_container", "基地附近没找到可用箱子。"),
             Map.entry("container_full", "附近容器满了,东西还留在背包里。"),
             Map.entry("partial_stockpile_container_full", "已经存了一部分,但基地箱子装不下剩余物品。"),
-            Map.entry("stockpile_timeout", "归仓时间太久了,我先停下来重新判断。")
+            Map.entry("stockpile_timeout", "归仓时间太久了,我先停下来重新判断。"),
+            Map.entry("no_supply", "基地没有可用补给,材料也不够现造。"),
+            Map.entry("no_food", "背包里没有可吃的食物。"),
+            Map.entry("resupply_timeout", "补给时间太久了,我先停下来重新判断。")
     );
 
     private ReasonText() {
@@ -74,6 +77,7 @@ public final class ReasonText {
             case "forage" -> "收集";
             case "container" -> "整理容器";
             case "stockpile" -> "归仓";
+            case "resupply" -> "自动补给";
             case "strip_mine" -> "鱼骨挖矿";
             case "farm" -> "农场工作";
             case "breed" -> "繁殖动物";
