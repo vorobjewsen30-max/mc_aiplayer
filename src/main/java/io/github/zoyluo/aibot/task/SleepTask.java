@@ -59,6 +59,11 @@ public final class SleepTask extends AbstractTask {
     }
 
     @Override
+    public boolean isWaiting() {
+        return phase == Phase.WAIT_MORNING;
+    }
+
+    @Override
     protected void onStart(AIPlayerEntity bot) {
         phase = Phase.FIND_BED;
     }

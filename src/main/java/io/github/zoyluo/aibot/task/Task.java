@@ -24,4 +24,8 @@ public interface Task {
     double progress();
 
     int elapsedTicks();
+
+    default boolean isWaiting() {
+        return false;
+    }
 }

@@ -84,6 +84,11 @@ public final class SmeltTask extends AbstractTask {
     }
 
     @Override
+    public boolean isWaiting() {
+        return phase == Phase.SMELTING;
+    }
+
+    @Override
     protected void onStart(AIPlayerEntity bot) {
         phase = Phase.FINDING_FURNACE;
     }

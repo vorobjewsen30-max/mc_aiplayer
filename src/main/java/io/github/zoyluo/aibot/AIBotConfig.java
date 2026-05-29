@@ -17,6 +17,7 @@ public record AIBotConfig(
         DeepSeek deepseek,
         Perception perception,
         Brain brain,
+        Watchdog watchdog,
         Logging logging,
         Survival survival,
         Combat combat,
@@ -66,7 +67,7 @@ public record AIBotConfig(
     }
 
     public AIBotConfig withDeepSeek(DeepSeek deepseek) {
-        return new AIBotConfig(deepseek, perception(), brain(), logging(), survival(), combat(), night(), mining());
+        return new AIBotConfig(deepseek, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining());
     }
 
     private AIBotConfig withDefaults() {
@@ -75,6 +76,7 @@ public record AIBotConfig(
                 deepseek == null ? defaults.deepseek : deepseek.withDefaults(defaults.deepseek),
                 perception == null ? defaults.perception : perception.withDefaults(defaults.perception),
                 brain == null ? defaults.brain : brain.withDefaults(defaults.brain),
+                watchdog == null ? defaults.watchdog : watchdog.withDefaults(defaults.watchdog),
                 logging == null ? defaults.logging : logging.withDefaults(defaults.logging),
                 survival == null ? defaults.survival : survival.withDefaults(defaults.survival),
                 combat == null ? defaults.combat : combat.withDefaults(defaults.combat),
@@ -87,6 +89,7 @@ public record AIBotConfig(
                 new DeepSeek("", "https://api.deepseek.com", "deepseek-chat", 2048, 0.3D, 60, 3, 500),
                 new Perception(16, 20, 10, 10),
                 new Brain(36, 6, 24, false, true, false, 3),
+                new Watchdog(200),
                 new Logging(true, "logs/aibot", true, "daily", 50, 30, true, Map.of(
                         "LIFECYCLE", "INFO",
                         "COMM", "INFO",
@@ -202,6 +205,12 @@ public record AIBotConfig(
                     positiveOrDefault(returnWhenFreeSlots, defaults.returnWhenFreeSlots),
                     toolDurabilityFloor > 0.0D ? toolDurabilityFloor : defaults.toolDurabilityFloor,
                     placeTorches);
+        }
+    }
+
+    public record Watchdog(int stuckWindowTicks) {
+        Watchdog withDefaults(Watchdog defaults) {
+            return new Watchdog(positiveOrDefault(stuckWindowTicks, defaults.stuckWindowTicks));
         }
     }
 
