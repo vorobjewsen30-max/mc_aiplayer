@@ -108,7 +108,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 **改动**:单遍历分发 危险/卡死/空闲/目标 四类检查(读 `TpsGuard.scanInterval()`);A* 失败短路 + 结果缓存/节流;`TpsGuard` degraded **分级降级**(先降感知/续转/非关键任务,危险响应最后降),阈值实测调参。
 **验收**:10 bot 同时干活 TPS≥19;`/aibot profile` 无单段失控;制造卡顿能 degraded 并恢复。
 
-## WO-RL-10 · 对话反馈:错误友好化 + 主动汇报  (PLAN §RL-10)
+## WO-RL-10 · 对话反馈:错误友好化 + 主动汇报  (PLAN §RL-10) ✅ done: BotReporter/ReasonText/verboseReports 已实现, 任务节点中文系统播报与失败友好文案已接入, compileJava/compileClientJava 通过。
 **文件**:新 `brain/BotReporter`、`brain/ReasonText`、`AIBotConfig.Brain.verboseReports`
 **改动**:任务 `assigned/关键phase/completed/failed` 节点经 `sendBotChat`(面板通道,OPT-7)播中文摘要(**只播节点+限频+去重**);长任务 25/50/75/100% 各播一次;失败 reason → 中文友好(`need:x`→缺少X、`pickup_timeout`→没捡到掉落物、`stuck`→卡住换办法)。给 LLM 的仍是原始 reason(RL-1)。
 **验收**:`gather 石头` → 面板"开始挖石头 → 已挖 5/10 → 完成"中文播报;失败给人话。

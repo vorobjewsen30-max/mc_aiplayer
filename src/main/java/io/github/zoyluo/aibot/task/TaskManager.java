@@ -1,5 +1,6 @@
 package io.github.zoyluo.aibot.task;
 
+import io.github.zoyluo.aibot.brain.BotReporter;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
@@ -29,7 +30,9 @@ public final class TaskManager {
         bot.getActionPack().stopAll();
         active.put(bot.getUuid(), task);
         task.start(bot);
-        lastStatus.put(bot.getUuid(), TaskStatus.from(task));
+        TaskStatus status = TaskStatus.from(task);
+        lastStatus.put(bot.getUuid(), status);
+        BotReporter.INSTANCE.onAssigned(bot, status);
         BotLog.task(bot, "task_assigned", "name", task.name(), "params", task.describe());
     }
 
@@ -38,6 +41,7 @@ public final class TaskManager {
         if (current != null) {
             current.abort(bot);
             lastStatus.put(bot.getUuid(), TaskStatus.from(current));
+            BotReporter.INSTANCE.onStatus(bot.getServer(), bot, TaskStatus.from(current));
         }
     }
 
@@ -68,7 +72,9 @@ public final class TaskManager {
         }
         current.pause(bot);
         paused.put(bot.getUuid(), current);
-        lastStatus.put(bot.getUuid(), TaskStatus.from(current));
+        TaskStatus status = TaskStatus.from(current);
+        lastStatus.put(bot.getUuid(), status);
+        BotReporter.INSTANCE.onStatus(bot.getServer(), bot, status);
         BotLog.task(bot, "task_paused", "name", current.name(), "why", why);
     }
 
@@ -82,7 +88,9 @@ public final class TaskManager {
         }
         active.put(bot.getUuid(), task);
         task.resume(bot);
-        lastStatus.put(bot.getUuid(), TaskStatus.from(task));
+        TaskStatus status = TaskStatus.from(task);
+        lastStatus.put(bot.getUuid(), status);
+        BotReporter.INSTANCE.onStatus(bot.getServer(), bot, status);
         BotLog.task(bot, "task_resumed", "name", task.name());
     }
 
@@ -107,7 +115,9 @@ public final class TaskManager {
             } finally {
                 BotProfiler.INSTANCE.record(player, "task_tick", System.nanoTime() - started);
             }
-            lastStatus.put(uuid, TaskStatus.from(task));
+            TaskStatus status = TaskStatus.from(task);
+            lastStatus.put(uuid, status);
+            BotReporter.INSTANCE.onStatus(server, player, status);
             if (task.state() == TaskState.COMPLETED) {
                 active.remove(uuid);
                 lastFailure.remove(uuid);
@@ -153,6 +163,7 @@ public final class TaskManager {
         paused.remove(bot.getUuid());
         lastStatus.remove(bot.getUuid());
         lastFailure.remove(bot.getUuid());
+        BotReporter.INSTANCE.onCleared(bot);
     }
 
     public int activeCount() {

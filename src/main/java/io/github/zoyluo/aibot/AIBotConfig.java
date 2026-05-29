@@ -88,7 +88,7 @@ public record AIBotConfig(
         return new AIBotConfig(
                 new DeepSeek("", "https://api.deepseek.com", "deepseek-chat", 2048, 0.3D, 60, 3, 500),
                 new Perception(16, 20, 10, 10, false),
-                new Brain(36, 6, 24, false, true, false, 3),
+                new Brain(36, 6, 24, false, true, false, 3, true),
                 new Watchdog(200),
                 new Logging(true, "logs/aibot", true, "daily", 50, 30, true, Map.of(
                         "LIFECYCLE", "INFO",
@@ -152,7 +152,8 @@ public record AIBotConfig(
             Boolean exposeLowLevelTools,
             Boolean enableMemoryTools,
             Boolean enableCoordinationTools,
-            int maxTaskRetries
+            int maxTaskRetries,
+            Boolean verboseReports
     ) {
         Brain withDefaults(Brain defaults) {
             return new Brain(
@@ -162,7 +163,8 @@ public record AIBotConfig(
                     boolOrDefault(exposeLowLevelTools, defaults.exposeLowLevelTools),
                     boolOrDefault(enableMemoryTools, defaults.enableMemoryTools),
                     boolOrDefault(enableCoordinationTools, defaults.enableCoordinationTools),
-                    positiveOrDefault(maxTaskRetries, defaults.maxTaskRetries));
+                    positiveOrDefault(maxTaskRetries, defaults.maxTaskRetries),
+                    boolOrDefault(verboseReports, defaults.verboseReports));
         }
 
         public boolean exposesLowLevelTools() {
@@ -175,6 +177,10 @@ public record AIBotConfig(
 
         public boolean coordinationToolsEnabled() {
             return Boolean.TRUE.equals(enableCoordinationTools);
+        }
+
+        public boolean verboseReportsEnabled() {
+            return Boolean.TRUE.equals(verboseReports);
         }
     }
 
