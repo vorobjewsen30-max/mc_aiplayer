@@ -27,6 +27,7 @@ import io.github.zoyluo.aibot.task.CraftTask;
 import io.github.zoyluo.aibot.task.EatTask;
 import io.github.zoyluo.aibot.task.ForageTask;
 import io.github.zoyluo.aibot.task.FarmTask;
+import io.github.zoyluo.aibot.task.GatherQuotaTask;
 import io.github.zoyluo.aibot.task.LightAreaTask;
 import io.github.zoyluo.aibot.task.MineTask;
 import io.github.zoyluo.aibot.task.MoveTask;
@@ -180,6 +181,16 @@ public final class ToolRegistry {
                     requiredItem(args, "input_item"),
                     requiredItem(args, "output_item"),
                     optionalInt(args, "count", 1));
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("gather", "Gather an item until the inventory contains the requested quota. Use this for requests like collect 64 cobblestone; it loops survey, move, harvest, and pickup without assigning child tasks.", objectSchema()
+                .property("item", stringSchema("target item id, for example minecraft:cobblestone"))
+                .property("count", integerSchema("desired inventory count"))
+                .required("item")
+                .build(), (bot, args) -> {
+            Task task = new GatherQuotaTask(requiredItem(args, "item"), optionalInt(args, "count", 1));
             TaskManager.INSTANCE.assign(bot, task);
             return ok("assigned: " + task.name());
         });
@@ -467,8 +478,8 @@ public final class ToolRegistry {
         register("goal_status", "Get the current persistent long-term goal status", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) ->
                 ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus("")));
 
-        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, foraging, mining, combat, building, sleep, lighting, farming, breeding, and container work. Use dedicated craft, eat, and smelt tools for those actions. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
-                .property("task_type", stringSchema("move, forage, attack, mine, strip_mine, mine_vein, build, sleep, light_area, farm, harvest, breed, deposit, or withdraw"))
+        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, gathering, foraging, mining, combat, building, sleep, lighting, farming, breeding, and container work. Use dedicated craft, eat, and smelt tools for those actions. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
+                .property("task_type", stringSchema("move, gather, forage, attack, mine, strip_mine, mine_vein, build, sleep, light_area, farm, harvest, breed, deposit, or withdraw"))
                 .property("params", objectSchema().build())
                 .required("task_type")
                 .required("params")
@@ -509,6 +520,7 @@ public final class ToolRegistry {
                 Block block = blockWithAlias(params, "block", "block_type");
                 yield new MineTask(block, optionalInt(params, "count", 1));
             }
+            case "gather" -> new GatherQuotaTask(requiredItem(params, "item"), optionalInt(params, "count", 1));
             case "sleep" -> new SleepTask();
             case "light_area" -> new LightAreaTask(optionalInt(params, "radius", 8), optionalInt(params, "max_torches", 8));
             case "farm" -> {

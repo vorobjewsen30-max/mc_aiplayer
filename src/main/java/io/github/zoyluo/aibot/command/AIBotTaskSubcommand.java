@@ -18,6 +18,7 @@ import io.github.zoyluo.aibot.task.CraftTask;
 import io.github.zoyluo.aibot.task.EatTask;
 import io.github.zoyluo.aibot.task.FarmTask;
 import io.github.zoyluo.aibot.task.ForageTask;
+import io.github.zoyluo.aibot.task.GatherQuotaTask;
 import io.github.zoyluo.aibot.task.LightAreaTask;
 import io.github.zoyluo.aibot.task.MineTask;
 import io.github.zoyluo.aibot.task.MoveTask;
@@ -69,6 +70,11 @@ public final class AIBotTaskSubcommand {
                                                 .executes(context -> assignMine(context, 1))
                                                 .then(argument("count", IntegerArgumentType.integer(1))
                                                         .executes(context -> assignMine(context, IntegerArgumentType.getInteger(context, "count"))))))
+                                .then(literal("gather")
+                                        .then(argument("item", IdentifierArgumentType.identifier())
+                                                .executes(context -> assignGather(context, 1))
+                                                .then(argument("count", IntegerArgumentType.integer(1))
+                                                        .executes(context -> assignGather(context, IntegerArgumentType.getInteger(context, "count"))))))
                                 .then(literal("strip_mine")
                                         .then(argument("direction", StringArgumentType.word())
                                                 .executes(context -> assignStripMine(context, 16, 4, null))
@@ -219,6 +225,12 @@ public final class AIBotTaskSubcommand {
             Block block = Registries.BLOCK.get(IdentifierArgumentType.getIdentifier(context, "block"));
             return new MineTask(block, count);
         });
+    }
+
+    private static int assignGather(CommandContext<ServerCommandSource> context, int count) {
+        return assign(context, bot -> new GatherQuotaTask(
+                Registries.ITEM.get(IdentifierArgumentType.getIdentifier(context, "item")),
+                count));
     }
 
     private static int assignStripMine(CommandContext<ServerCommandSource> context, int length, int spacing, BlockPos depot) {

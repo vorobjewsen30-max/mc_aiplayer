@@ -80,6 +80,7 @@
   "task.aibot.idle": "空闲",
   "task.aibot.move": "移动",
   "task.aibot.mine": "挖矿",
+  "task.aibot.gather": "采集",
   "task.aibot.craft": "合成",
   "task.aibot.eat": "进食",
   "task.aibot.smelt": "冶炼",

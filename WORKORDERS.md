@@ -123,7 +123,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 
 # W2 · 基地与持续生产
 
-## WO-RL-12 · "攒够 X"持续采集目标  (PLAN §RL-12)
+## WO-RL-12 · "攒够 X"持续采集目标  (PLAN §RL-12) ✅ done: GatherQuotaTask 与 HarvestCore 已实现并接入 gather/assign_task/命令, MineTask 复用 helper, compileJava/compileClientJava 通过。
 **文件**:新 `task/GatherQuotaTask`、抽 `action/HarvestCore`(挖+走到掉落物+捡拾的复用核心,并入 OPT-4/RL-7 捡拾改进)、`ToolRegistry`(`gather`)+`assign_task gather`
 **改动**:配额循环 `找最近资源→走→采集→计数→未达标继续`(按 item 类型选挖/打/收);满仓 → base 存(RL-13)否则 `fail("inventory_full")`;范围无目标 → `fail("no_resource_nearby")`。**内联复用 HarvestCore,绝不 assign 子任务(G1)**。
 **验收**:`gather minecraft:cobblestone 64` → 持续采到 64;满仓自动存箱续采。

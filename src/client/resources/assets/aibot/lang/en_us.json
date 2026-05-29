@@ -79,6 +79,7 @@
   "task.aibot.idle": "Idle",
   "task.aibot.move": "Move",
   "task.aibot.mine": "Mine",
+  "task.aibot.gather": "Gather",
   "task.aibot.craft": "Craft",
   "task.aibot.eat": "Eat",
   "task.aibot.smelt": "Smelt",
