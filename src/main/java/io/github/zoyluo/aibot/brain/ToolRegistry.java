@@ -1,6 +1,7 @@
 package io.github.zoyluo.aibot.brain;
 
 import com.google.gson.JsonObject;
+import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.action.BuildAction;
 import io.github.zoyluo.aibot.action.EquipAction;
 import io.github.zoyluo.aibot.action.FarmAction;
@@ -12,6 +13,8 @@ import io.github.zoyluo.aibot.action.MovementAction;
 import io.github.zoyluo.aibot.action.ToolSelector;
 import io.github.zoyluo.aibot.coordination.Job;
 import io.github.zoyluo.aibot.coordination.TaskBoard;
+import io.github.zoyluo.aibot.craft.AcquisitionHints;
+import io.github.zoyluo.aibot.craft.CraftingHelper;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.memory.BotMemory;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
@@ -67,22 +70,37 @@ public final class ToolRegistry {
         return List.copyOf(tools.values());
     }
 
+    public List<ToolDefinition> tools(AIBotConfig.Brain config) {
+        return tools(config, config.exposesLowLevelTools());
+    }
+
+    public List<ToolDefinition> tools(AIBotConfig.Brain config, boolean exposeLowLevelTools) {
+        return tools.values().stream()
+                .filter(tool -> switch (tool.group()) {
+                    case CORE -> true;
+                    case MEMORY -> config.memoryToolsEnabled();
+                    case COORDINATION -> config.coordinationToolsEnabled();
+                    case LOW_LEVEL -> exposeLowLevelTools;
+                })
+                .toList();
+    }
+
     private void registerDefaults() {
-        register("say", "Reply to the human in chat", objectSchema()
+        register("say", "Reply to the human in Simplified Chinese. The reply is shown in the AIBot panel.", objectSchema()
                 .property("message", stringSchema("the text to say"))
                 .required("message")
                 .build(), (bot, args) -> {
             String message = requiredString(args, "message");
-            bot.getServer().getPlayerManager().broadcast(net.minecraft.text.Text.literal("<" + bot.getGameProfile().getName() + "> " + message), false);
+            BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot", message);
             return ok("said");
         });
 
-        register("look_at", "Turn the bot's head toward a coordinate", xyzSchema(), (bot, args) -> {
+        register("look_at", "Turn the bot's head toward a coordinate", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
             LookAction.lookAt(bot, new Vec3d(requiredInt(args, "x"), requiredInt(args, "y"), requiredInt(args, "z")));
             return ok("looked");
         });
 
-        register("move_to", "Pathfind to a coordinate. Falls back to straight-line walking if pathfinding fails.", xyzSchema(), (bot, args) -> {
+        register("move_to", "Pathfind to a coordinate. Falls back to straight-line walking if pathfinding fails.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
             BlockPos goal = blockPos(args);
             io.github.zoyluo.aibot.action.ActionResult pathResult = MovementAction.startPathTo(bot, goal);
             if (pathResult.isInProgress() || pathResult.isSuccess()) {
@@ -95,20 +113,20 @@ public final class ToolRegistry {
             return fail("path_and_walk_both_failed: " + pathResult.reason());
         });
 
-        register("mine_block", "Low-level single-block break at given coords. Bot must already be within reach. For gathering materials or mining counts, prefer assign_task with task_type mine.", xyzSchema(), (bot, args) -> {
+        register("mine_block", "Low-level single-block break at given coords. Bot must already be within reach. For gathering materials or mining counts, prefer assign_task with task_type mine.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
             BlockPos pos = blockPos(args);
             MiningAction.startMining(bot, pos, Direction.getFacing(bot.getEyePos().subtract(pos.toCenterPos())));
             return ok("started");
         });
 
-        register("place_block", "Low-level manual placement of the currently held block at given coords. For crafting table placement during recipes, prefer craft because it can place a held crafting table automatically.", xyzSchema(), (bot, args) -> {
+        register("place_block", "Low-level manual placement of the currently held block at given coords. For crafting table placement during recipes, prefer craft because it can place a held crafting table automatically.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
             return result(BuildAction.placeBlockAt(bot, blockPos(args)));
         });
 
         register("select_hotbar", "Select hotbar slot 0..8", objectSchema()
                 .property("slot", integerSchema("hotbar slot", 0, 8))
                 .required("slot")
-                .build(), (bot, args) -> result(InventoryAction.selectHotbar(bot, requiredInt(args, "slot"))));
+                .build(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> result(InventoryAction.selectHotbar(bot, requiredInt(args, "slot"))));
 
         register("inventory", "Get the bot's current inventory", objectSchema().build(), (bot, args) ->
                 ok(InventoryAction.summarize(bot).toString()));
@@ -121,6 +139,12 @@ public final class ToolRegistry {
             ToolSelector.Selection selection = ToolSelector.equipBestTool(bot, block.getDefaultState());
             return ok(selection.describe());
         });
+
+        register("plan_craft", "Read-only preflight for crafting. Returns feasible, deterministic craft steps, missing materials, and each missing material's acquisition source.", objectSchema()
+                .property("item", stringSchema("target item id, for example minecraft:stone_pickaxe"))
+                .property("count", integerSchema("desired count"))
+                .required("item")
+                .build(), (bot, args) -> ok(craftPlanJson(CraftingHelper.plan(bot, requiredItem(args, "item"), optionalInt(args, "count", 1)))));
 
         register("craft", "Craft an item using known survival recipes. It resolves planks and sticks recursively, so prefer crafting the target tool/item directly instead of crafting planks or sticks as separate steps. It does not gather, smelt, or open GUIs. For 3x3 recipes, craft minecraft:crafting_table first; after that this task can use a nearby table or place a held table automatically. Do not use select_hotbar/place_block for the crafting table unless the human asks. Fails with need: <item> xN when base materials are missing.", objectSchema()
                 .property("item", stringSchema("item id, for example minecraft:stone_pickaxe"))
@@ -302,7 +326,7 @@ public final class ToolRegistry {
         register("attack_entity", "Attack a nearby entity by type", objectSchema()
                 .property("entity_type", stringSchema("entity type, for example minecraft:cow"))
                 .required("entity_type")
-                .build(), (bot, args) -> {
+                .build(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
             String entityType = requiredString(args, "entity_type");
             Identifier id = Identifier.of(entityType);
             Optional<Entity> target = bot.getServerWorld()
@@ -326,12 +350,12 @@ public final class ToolRegistry {
                 .property("params", objectSchema().build())
                 .required("kind")
                 .required("params")
-                .build(), (bot, args) -> {
+                .build(), ToolDefinition.Group.COORDINATION, (bot, args) -> {
             UUID id = TaskBoard.INSTANCE.post(requiredString(args, "kind"), paramsObject(args, "params"), optionalString(args, "role", ""));
             return ok("job_posted: " + id);
         });
 
-        register("list_jobs", "List shared jobs on the multi-bot task board", objectSchema().build(), (bot, args) -> {
+        register("list_jobs", "List shared jobs on the multi-bot task board", objectSchema().build(), ToolDefinition.Group.COORDINATION, (bot, args) -> {
             List<Job> jobs = TaskBoard.INSTANCE.snapshot();
             if (jobs.isEmpty()) {
                 return ok("[]");
@@ -358,7 +382,7 @@ public final class ToolRegistry {
                 .property("message", stringSchema("message text"))
                 .required("target")
                 .required("message")
-                .build(), (bot, args) -> {
+                .build(), ToolDefinition.Group.COORDINATION, (bot, args) -> {
             String targetName = requiredString(args, "target");
             var target = AIPlayerManager.INSTANCE.getByName(targetName);
             if (target.isEmpty()) {
@@ -373,7 +397,7 @@ public final class ToolRegistry {
                 .property("value", stringSchema("memory value"))
                 .required("key")
                 .required("value")
-                .build(), (bot, args) -> {
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
             BotMemoryStore.INSTANCE.of(bot.getUuid()).remember(requiredString(args, "key"), requiredString(args, "value"));
             return ok("remembered");
         });
@@ -381,7 +405,7 @@ public final class ToolRegistry {
         register("recall", "Recall a persistent fact by key", objectSchema()
                 .property("key", stringSchema("memory key"))
                 .required("key")
-                .build(), (bot, args) -> BotMemoryStore.INSTANCE.of(bot.getUuid())
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> BotMemoryStore.INSTANCE.of(bot.getUuid())
                 .recall(requiredString(args, "key"))
                 .map(ToolRegistry::ok)
                 .orElseGet(() -> fail("missing_memory: " + requiredString(args, "key"))));
@@ -389,7 +413,7 @@ public final class ToolRegistry {
         register("forget", "Delete a persistent fact by key", objectSchema()
                 .property("key", stringSchema("memory key"))
                 .required("key")
-                .build(), (bot, args) -> {
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
             boolean removed = BotMemoryStore.INSTANCE.of(bot.getUuid()).forget(requiredString(args, "key"));
             return ok("forgotten: " + removed);
         });
@@ -397,7 +421,7 @@ public final class ToolRegistry {
         register("mark_place", "Remember the bot's current block position as a named place", objectSchema()
                 .property("name", stringSchema("place name, for example home"))
                 .required("name")
-                .build(), (bot, args) -> {
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
             BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace(requiredString(args, "name"), bot.getServerWorld(), bot.getBlockPos());
             return ok("marked_place: " + requiredString(args, "name") + " at " + bot.getBlockPos().toShortString());
         });
@@ -405,7 +429,7 @@ public final class ToolRegistry {
         register("goto_place", "Assign a move task to a remembered named place in the current dimension", objectSchema()
                 .property("name", stringSchema("place name"))
                 .required("name")
-                .build(), (bot, args) -> {
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
             Optional<BotMemory.Place> place = BotMemoryStore.INSTANCE.of(bot.getUuid()).place(requiredString(args, "name"));
             if (place.isEmpty()) {
                 return fail("unknown_place: " + requiredString(args, "name"));
@@ -423,7 +447,7 @@ public final class ToolRegistry {
                 .property("steps", arrayOfStringsSchema("ordered goal steps"))
                 .required("title")
                 .required("steps")
-                .build(), (bot, args) -> {
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
             List<String> steps = stringArray(args, "steps");
             BotMemoryStore.INSTANCE.of(bot.getUuid()).setGoal(requiredString(args, "title"), steps);
             return ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus(""));
@@ -431,13 +455,13 @@ public final class ToolRegistry {
 
         register("advance_goal", "Advance the current persistent long-term goal by one step", objectSchema()
                 .property("result", stringSchema("short result of the completed step"))
-                .build(), (bot, args) -> ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).advanceGoal(optionalString(args, "result", ""))));
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).advanceGoal(optionalString(args, "result", ""))));
 
-        register("goal_status", "Get the current persistent long-term goal status", objectSchema().build(), (bot, args) ->
+        register("goal_status", "Get the current persistent long-term goal status", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) ->
                 ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus("")));
 
-        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for mining/gathering/combat counts instead of low-level tools. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
-                .property("task_type", stringSchema("move, forage, attack, mine, strip_mine, mine_vein, build, craft, eat, smelt, sleep, light_area, farm, harvest, breed, deposit, or withdraw"))
+        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, foraging, mining, combat, building, sleep, lighting, farming, breeding, and container work. Use dedicated craft, eat, and smelt tools for those actions. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
+                .property("task_type", stringSchema("move, forage, attack, mine, strip_mine, mine_vein, build, sleep, light_area, farm, harvest, breed, deposit, or withdraw"))
                 .property("params", objectSchema().build())
                 .required("task_type")
                 .required("params")
@@ -478,8 +502,6 @@ public final class ToolRegistry {
                 Block block = blockWithAlias(params, "block", "block_type");
                 yield new MineTask(block, optionalInt(params, "count", 1));
             }
-            case "craft" -> new CraftTask(requiredItem(params, "item"), optionalInt(params, "count", 1));
-            case "eat" -> new EatTask();
             case "sleep" -> new SleepTask();
             case "light_area" -> new LightAreaTask(optionalInt(params, "radius", 8), optionalInt(params, "max_torches", 8));
             case "farm" -> {
@@ -492,10 +514,6 @@ public final class ToolRegistry {
                 yield new FarmTask(blockPos(params), optionalInt(params, "radius", 3), spec.seed(), spec.crop(), false, true);
             }
             case "breed" -> new BreedTask(requiredEntityType(params, "entity_type"), optionalInt(params, "pairs", 1));
-            case "smelt" -> new SmeltTask(
-                    requiredItem(params, "input_item"),
-                    requiredItem(params, "output_item"),
-                    optionalInt(params, "count", 1));
             case "strip_mine" -> new StripMineTask(
                     optionalDirection(params, "direction", Direction.NORTH),
                     optionalInt(params, "length", 16),
@@ -537,6 +555,52 @@ public final class ToolRegistry {
 
     private void register(String name, String description, JsonObject schema, ToolDefinition.Handler handler) {
         tools.put(name, new ToolDefinition(name, description, schema, handler));
+    }
+
+    private void register(String name, String description, JsonObject schema, ToolDefinition.Group group, ToolDefinition.Handler handler) {
+        tools.put(name, new ToolDefinition(name, description, schema, handler, group));
+    }
+
+    private static String craftPlanJson(CraftingHelper.CraftPlan plan) {
+        JsonObject root = new JsonObject();
+        root.addProperty("feasible", plan.success());
+        root.addProperty("target", Registries.ITEM.getId(plan.target()).toString());
+        root.addProperty("count", plan.targetCount());
+        root.addProperty("needs_crafting_table", plan.needsCraftingTable());
+
+        com.google.gson.JsonArray steps = new com.google.gson.JsonArray();
+        for (CraftingHelper.CraftStep step : plan.steps()) {
+            JsonObject json = new JsonObject();
+            json.addProperty("output", Registries.ITEM.getId(step.recipe().output()).toString());
+            json.addProperty("crafts", step.crafts());
+            json.addProperty("output_count", step.outputCount());
+            json.addProperty("needs_crafting_table", step.recipe().needsCraftingTable());
+            com.google.gson.JsonArray ingredients = new com.google.gson.JsonArray();
+            for (io.github.zoyluo.aibot.craft.RecipeRegistry.Ingredient ingredient : step.recipe().ingredients()) {
+                JsonObject ingredientJson = new JsonObject();
+                ingredientJson.addProperty("count", ingredient.count() * step.crafts());
+                com.google.gson.JsonArray anyOf = new com.google.gson.JsonArray();
+                for (Item item : ingredient.anyOf()) {
+                    anyOf.add(Registries.ITEM.getId(item).toString());
+                }
+                ingredientJson.add("any_of", anyOf);
+                ingredients.add(ingredientJson);
+            }
+            json.add("ingredients", ingredients);
+            steps.add(json);
+        }
+        root.add("steps", steps);
+
+        com.google.gson.JsonArray missing = new com.google.gson.JsonArray();
+        for (CraftingHelper.Missing item : plan.missing()) {
+            JsonObject json = new JsonObject();
+            json.addProperty("item", Registries.ITEM.getId(item.item()).toString());
+            json.addProperty("count", item.count());
+            json.addProperty("source", AcquisitionHints.source(item.item()));
+            missing.add(json);
+        }
+        root.add("missing", missing);
+        return root.toString();
     }
 
     private static ToolDefinition.ToolResult result(io.github.zoyluo.aibot.action.ActionResult actionResult) {
