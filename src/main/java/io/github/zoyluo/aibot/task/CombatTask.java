@@ -1,17 +1,9 @@
 package io.github.zoyluo.aibot.task;
 
-import io.github.zoyluo.aibot.action.ActionResult;
-import io.github.zoyluo.aibot.action.EquipAction;
-import io.github.zoyluo.aibot.action.InteractAction;
-import io.github.zoyluo.aibot.action.LookAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.registry.Registries;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-
-import java.util.Comparator;
 
 public final class CombatTask extends AbstractTask {
     private enum Phase {
@@ -22,7 +14,6 @@ public final class CombatTask extends AbstractTask {
         RETREAT
     }
 
-    private static final float ATTACK_RANGE = 3.0F;
     private static final int SEARCH_RANGE = 20;
 
     private final EntityType<?> targetType;
@@ -56,8 +47,7 @@ public final class CombatTask extends AbstractTask {
 
     @Override
     protected void onStart(AIPlayerEntity bot) {
-        EquipAction.equipBestArmor(bot);
-        EquipAction.equipBestWeapon(bot);
+        CombatCore.equipMelee(bot);
         phase = Phase.ACQUIRE;
     }
 
@@ -80,12 +70,7 @@ public final class CombatTask extends AbstractTask {
     }
 
     private void acquire(AIPlayerEntity bot) {
-        target = bot.getServerWorld()
-                .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(SEARCH_RANGE),
-                        entity -> entity.isAlive() && entity.getType().equals(targetType) && entity != bot)
-                .stream()
-                .min(Comparator.comparingDouble(bot::distanceTo))
-                .orElse(null);
+        target = CombatCore.nearestTarget(bot, targetType, SEARCH_RANGE).orElse(null);
         if (target == null) {
             if (kills > 0) {
                 complete();
@@ -104,8 +89,8 @@ public final class CombatTask extends AbstractTask {
             finishOrAcquire();
             return;
         }
-        lookAtTarget(bot);
-        if (bot.distanceTo(target) <= ATTACK_RANGE) {
+        CombatCore.lookAt(bot, target);
+        if (CombatCore.inMeleeRange(bot, target)) {
             bot.getActionPack().stopAll();
             phase = Phase.STRIKE;
             return;
@@ -121,14 +106,13 @@ public final class CombatTask extends AbstractTask {
             finishOrAcquire();
             return;
         }
-        lookAtTarget(bot);
-        if (bot.distanceTo(target) > ATTACK_RANGE + 0.75F) {
+        CombatCore.lookAt(bot, target);
+        if (bot.distanceTo(target) > CombatCore.ATTACK_RANGE + 0.75F) {
             phase = Phase.APPROACH;
             startApproach(bot);
             return;
         }
-        if (bot.getAttackCooldownProgress(0.5F) >= 0.95F) {
-            InteractAction.attackEntity(bot, target);
+        if (CombatCore.strikeIfReady(bot, target)) {
             repositionTicks = 8;
             phase = Phase.REPOSITION;
         }
@@ -141,7 +125,7 @@ public final class CombatTask extends AbstractTask {
             finishOrAcquire();
             return;
         }
-        lookAtTarget(bot);
+        CombatCore.lookAt(bot, target);
         bot.getActionPack().setStrafing(elapsed % 40 < 20 ? 0.45F : -0.45F);
         repositionTicks--;
         if (repositionTicks <= 0) {
@@ -156,16 +140,7 @@ public final class CombatTask extends AbstractTask {
     }
 
     private void startApproach(AIPlayerEntity bot) {
-        BlockPos goal = target.getBlockPos();
-        ActionResult result = bot.getActionPack().startPathTo(goal);
-        if (result.isFailed()) {
-            bot.getActionPack().startWalkTo(target.getPos());
-        }
-    }
-
-    private void lookAtTarget(AIPlayerEntity bot) {
-        Vec3d targetCenter = target.getPos().add(0.0D, target.getHeight() * 0.5D, 0.0D);
-        LookAction.lookAt(bot, targetCenter);
+        CombatCore.startApproach(bot, target);
     }
 
     private void finishOrAcquire() {

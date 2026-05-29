@@ -152,7 +152,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 
 # W3 · 真玩家行为
 
-## WO-RL-17 · 跟随 / 待命 / 护卫  (PLAN §RL-17)
+## WO-RL-17 · 跟随 / 待命 / 护卫  (PLAN §RL-17) ✅ done: 新增 FollowTask/HoldTask/GuardTask 与 CombatCore, 工具/assign_task 接入 follow/hold/guard, compileJava/compileClientJava 通过。
 **文件**:新 `task/FollowTask`/`HoldTask`/`GuardTask`、抽战斗内核 helper(GuardTask + CombatTask 共用)、工具 `follow`/`hold`/`guard`
 **改动**:Follow 持续路径到玩家 reach(半径滞回 + 限频重算);Hold `stopAll` 待命(威胁仍交 DangerWatcher);Guard 守护点,敌近**内联**战斗(复用 helper,不 assign,G1)。目标玩家默认 = 指令发起者/owner。
 **验收**:`follow` 跟随保持 2–4 格;`hold` 不动;`guard` 守位打怪打完回位。

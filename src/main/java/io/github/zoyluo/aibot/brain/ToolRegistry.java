@@ -28,6 +28,9 @@ import io.github.zoyluo.aibot.task.EatTask;
 import io.github.zoyluo.aibot.task.ForageTask;
 import io.github.zoyluo.aibot.task.FarmTask;
 import io.github.zoyluo.aibot.task.GatherQuotaTask;
+import io.github.zoyluo.aibot.task.FollowTask;
+import io.github.zoyluo.aibot.task.GuardTask;
+import io.github.zoyluo.aibot.task.HoldTask;
 import io.github.zoyluo.aibot.task.LightAreaTask;
 import io.github.zoyluo.aibot.task.MineTask;
 import io.github.zoyluo.aibot.task.MoveTask;
@@ -309,6 +312,35 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
+        register("follow", "Follow a player while keeping roughly 2-4 blocks of distance. Omit player_name to follow this bot's owner.", objectSchema()
+                .property("player_name", stringSchema("optional player name; defaults to owner"))
+                .build(), (bot, args) -> {
+            Task task = new FollowTask(optionalString(args, "player_name", ""));
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("hold", "Hold the current position until another task is assigned. DangerWatcher can still interrupt for survival threats.", objectSchema().build(), (bot, args) -> {
+            Task task = new HoldTask();
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("guard", "Guard the current point, a coordinate, or a named player. Hostiles near the guard point are fought inline, then the bot returns.", objectSchema()
+                .property("player_name", stringSchema("optional player name to guard"))
+                .property("x", integerSchema("optional guard x"))
+                .property("y", integerSchema("optional guard y"))
+                .property("z", integerSchema("optional guard z"))
+                .build(), (bot, args) -> {
+            String playerName = optionalString(args, "player_name", "");
+            BlockPos point = optionalBlockPos(args, "x", "y", "z");
+            Task task = playerName.isBlank()
+                    ? GuardTask.point(point == null ? bot.getBlockPos() : point)
+                    : GuardTask.player(playerName);
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
         register("farm", "Till soil, plant crops, harvest mature crops, and optionally keep tending the area. Supported crops: wheat, carrot, potato.", objectSchema()
                 .property("x", integerSchema("area center x"))
                 .property("y", integerSchema("area center y"))
@@ -493,7 +525,7 @@ public final class ToolRegistry {
                 ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus("")));
 
         register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, gathering, foraging, mining, combat, building, sleep, lighting, farming, breeding, and container work. Use dedicated craft, eat, and smelt tools for those actions. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
-                .property("task_type", stringSchema("move, gather, forage, attack, mine, strip_mine, mine_vein, build, sleep, light_area, farm, harvest, breed, deposit, stockpile, or withdraw"))
+                .property("task_type", stringSchema("move, gather, forage, attack, mine, strip_mine, mine_vein, build, sleep, light_area, farm, harvest, breed, follow, hold, guard, deposit, stockpile, or withdraw"))
                 .property("params", objectSchema().build())
                 .required("task_type")
                 .required("params")
@@ -538,6 +570,13 @@ public final class ToolRegistry {
             case "stockpile" -> new StockpileTask(optionalBoolean(params, "all_except_tools", true));
             case "sleep" -> new SleepTask();
             case "light_area" -> new LightAreaTask(optionalInt(params, "radius", 8), optionalInt(params, "max_torches", 8));
+            case "follow" -> new FollowTask(optionalString(params, "player_name", ""));
+            case "hold" -> new HoldTask();
+            case "guard" -> {
+                String playerName = optionalString(params, "player_name", "");
+                BlockPos point = optionalBlockPos(params, "x", "y", "z");
+                yield playerName.isBlank() ? GuardTask.point(point) : GuardTask.player(playerName);
+            }
             case "farm" -> {
                 FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(params, "crop"));
                 yield new FarmTask(blockPos(params), optionalInt(params, "radius", 3), spec.seed(), spec.crop(),
