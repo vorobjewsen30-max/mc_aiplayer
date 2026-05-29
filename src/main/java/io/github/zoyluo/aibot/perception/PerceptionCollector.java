@@ -7,18 +7,23 @@ import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.LogFields;
 import io.github.zoyluo.aibot.task.TaskManager;
 import io.github.zoyluo.aibot.task.TaskStatus;
+import net.minecraft.block.Blocks;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.Monster;
 import net.minecraft.registry.Registries;
+import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class PerceptionCollector {
     private PerceptionCollector() {
@@ -40,9 +45,13 @@ public final class PerceptionCollector {
                 Registries.ITEM.getId(bot.getMainHandStack().getItem()).toString(),
                 InventoryAction.summarize(bot));
 
-        List<PerceptionSnapshot.NearbyBlock> blocks = collectBlocks(world, center, Math.min(config.radius(), 4), config.maxBlocks());
+        BlockScan blockScan = collectBlocks(world, center, Math.min(config.radius(), 8), config.maxBlocks());
         List<PerceptionSnapshot.NearbyEntity> entities = collectEntities(bot, world, config.radius(), config.maxEntities());
         List<PerceptionSnapshot.NearbyItem> items = collectItems(bot, world, config.radius(), config.maxItems());
+        PerceptionSnapshot.Highlights highlights = buildHighlights(blockScan.highlights(), entities);
+        List<PerceptionSnapshot.NearbyBlock> blocks = config.includeRawLists() ? blockScan.blocks() : List.of();
+        List<PerceptionSnapshot.NearbyEntity> rawEntities = config.includeRawLists() ? entities : List.of();
+        List<PerceptionSnapshot.NearbyItem> rawItems = config.includeRawLists() ? items : List.of();
         TaskStatus status = TaskManager.INSTANCE.status(bot);
         PerceptionSnapshot.TaskInfo task = new PerceptionSnapshot.TaskInfo(
                 status.name(),
@@ -57,7 +66,7 @@ public final class PerceptionCollector {
                 "hunger", bot.getHungerManager().getFoodLevel(),
                 "pos", LogFields.pos(center),
                 "holding", Registries.ITEM.getId(bot.getMainHandStack().getItem()),
-                "blocks_n", blocks.size(),
+                "blocks_n", blockScan.blocks().size(),
                 "entities_n", entities.size(),
                 "items_n", items.size(),
                 "light", world.getLightLevel(center));
@@ -67,20 +76,23 @@ public final class PerceptionCollector {
         return new PerceptionSnapshot(
                 self,
                 task,
+                highlights,
                 blocks,
-                entities,
-                items,
+                rawEntities,
+                rawItems,
                 new PerceptionSnapshot.TimeInfo(world.getTimeOfDay() % 24000L, world.isDay(), world.getLightLevel(center)));
     }
 
-    private static List<PerceptionSnapshot.NearbyBlock> collectBlocks(ServerWorld world, BlockPos center, int radius, int limit) {
+    private static BlockScan collectBlocks(ServerWorld world, BlockPos center, int radius, int limit) {
         List<PerceptionSnapshot.NearbyBlock> blocks = new ArrayList<>();
+        Map<String, List<PerceptionSnapshot.NearbyBlock>> highlights = new HashMap<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dy = -radius; dy <= radius; dy++) {
                 for (int dz = -radius; dz <= radius; dz++) {
                     BlockPos pos = center.add(dx, dy, dz);
                     BlockState state = world.getBlockState(pos);
-                    if (state.isAir()) {
+                    boolean water = state.getFluidState().isIn(FluidTags.WATER);
+                    if (state.isAir() && !water) {
                         continue;
                     }
                     double distance = Math.sqrt(center.getSquaredDistance(pos));
@@ -90,11 +102,16 @@ public final class PerceptionCollector {
                             pos.getY(),
                             pos.getZ(),
                             round(distance)));
+                    addHighlights(highlights, state, pos, round(distance), water);
                 }
             }
         }
         blocks.sort(Comparator.comparingDouble(PerceptionSnapshot.NearbyBlock::distance));
-        return blocks.stream().limit(limit).toList();
+        highlights.replaceAll((ignored, values) -> values.stream()
+                .sorted(Comparator.comparingDouble(PerceptionSnapshot.NearbyBlock::distance))
+                .limit(2)
+                .toList());
+        return new BlockScan(blocks.stream().limit(limit).toList(), highlights);
     }
 
     private static List<PerceptionSnapshot.NearbyEntity> collectEntities(AIPlayerEntity bot, ServerWorld world, int radius, int limit) {
@@ -134,7 +151,66 @@ public final class PerceptionCollector {
                 .toList();
     }
 
+    private static void addHighlights(Map<String, List<PerceptionSnapshot.NearbyBlock>> highlights,
+                                      BlockState state,
+                                      BlockPos pos,
+                                      double distance,
+                                      boolean water) {
+        if (water) {
+            addHighlight(highlights, "nearest_water", "minecraft:water", pos, distance);
+        }
+        if (state.isIn(BlockTags.LOGS)) {
+            addHighlight(highlights, "nearest_tree", Registries.BLOCK.getId(state.getBlock()).toString(), pos, distance);
+        }
+        if (state.isOf(Blocks.STONE) || state.isOf(Blocks.COBBLESTONE) || state.isOf(Blocks.DEEPSLATE)) {
+            addHighlight(highlights, "nearest_stone", Registries.BLOCK.getId(state.getBlock()).toString(), pos, distance);
+        }
+        String id = Registries.BLOCK.getId(state.getBlock()).toString();
+        if (id.endsWith("_ore")) {
+            addHighlight(highlights, "nearest_ore", id, pos, distance);
+        }
+        if (state.isOf(Blocks.FURNACE) || state.isOf(Blocks.BLAST_FURNACE) || state.isOf(Blocks.SMOKER)) {
+            addHighlight(highlights, "nearest_furnace", id, pos, distance);
+        }
+        if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL)) {
+            addHighlight(highlights, "nearest_chest", id, pos, distance);
+        }
+        if (state.isIn(BlockTags.BEDS)) {
+            addHighlight(highlights, "nearest_bed", id, pos, distance);
+        }
+    }
+
+    private static void addHighlight(Map<String, List<PerceptionSnapshot.NearbyBlock>> highlights,
+                                     String key,
+                                     String id,
+                                     BlockPos pos,
+                                     double distance) {
+        highlights.computeIfAbsent(key, ignored -> new ArrayList<>())
+                .add(new PerceptionSnapshot.NearbyBlock(id, pos.getX(), pos.getY(), pos.getZ(), distance));
+    }
+
+    private static PerceptionSnapshot.Highlights buildHighlights(Map<String, List<PerceptionSnapshot.NearbyBlock>> blockHighlights,
+                                                                 List<PerceptionSnapshot.NearbyEntity> entities) {
+        List<PerceptionSnapshot.NearbyEntity> hostiles = entities.stream()
+                .filter(PerceptionSnapshot.NearbyEntity::hostile)
+                .limit(2)
+                .toList();
+        return new PerceptionSnapshot.Highlights(
+                blockHighlights.getOrDefault("nearest_tree", List.of()),
+                blockHighlights.getOrDefault("nearest_stone", List.of()),
+                blockHighlights.getOrDefault("nearest_ore", List.of()),
+                blockHighlights.getOrDefault("nearest_water", List.of()),
+                blockHighlights.getOrDefault("nearest_furnace", List.of()),
+                blockHighlights.getOrDefault("nearest_chest", List.of()),
+                blockHighlights.getOrDefault("nearest_bed", List.of()),
+                hostiles);
+    }
+
     private static double round(double value) {
         return Math.round(value * 100.0D) / 100.0D;
+    }
+
+    private record BlockScan(List<PerceptionSnapshot.NearbyBlock> blocks,
+                             Map<String, List<PerceptionSnapshot.NearbyBlock>> highlights) {
     }
 }

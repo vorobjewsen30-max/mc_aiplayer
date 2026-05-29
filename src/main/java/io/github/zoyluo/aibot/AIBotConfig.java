@@ -87,7 +87,7 @@ public record AIBotConfig(
     public static AIBotConfig defaults() {
         return new AIBotConfig(
                 new DeepSeek("", "https://api.deepseek.com", "deepseek-chat", 2048, 0.3D, 60, 3, 500),
-                new Perception(16, 20, 10, 10),
+                new Perception(16, 20, 10, 10, false),
                 new Brain(36, 6, 24, false, true, false, 3),
                 new Watchdog(200),
                 new Logging(true, "logs/aibot", true, "daily", 50, 30, true, Map.of(
@@ -134,13 +134,14 @@ public record AIBotConfig(
         }
     }
 
-    public record Perception(int radius, int maxBlocks, int maxEntities, int maxItems) {
+    public record Perception(int radius, int maxBlocks, int maxEntities, int maxItems, boolean includeRawLists) {
         Perception withDefaults(Perception defaults) {
             return new Perception(
                     positiveOrDefault(radius, defaults.radius),
                     positiveOrDefault(maxBlocks, defaults.maxBlocks),
                     positiveOrDefault(maxEntities, defaults.maxEntities),
-                    positiveOrDefault(maxItems, defaults.maxItems));
+                    positiveOrDefault(maxItems, defaults.maxItems),
+                    includeRawLists);
         }
     }
 

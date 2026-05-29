@@ -8,6 +8,7 @@ import java.util.Map;
 public record PerceptionSnapshot(
         SelfState self,
         TaskInfo task,
+        Highlights highlights,
         List<NearbyBlock> blocks,
         List<NearbyEntity> entities,
         List<NearbyItem> items,
@@ -33,6 +34,18 @@ public record PerceptionSnapshot(
     }
 
     public record NearbyBlock(String type, int x, int y, int z, double distance) {
+    }
+
+    public record Highlights(
+            List<NearbyBlock> nearest_tree,
+            List<NearbyBlock> nearest_stone,
+            List<NearbyBlock> nearest_ore,
+            List<NearbyBlock> nearest_water,
+            List<NearbyBlock> nearest_furnace,
+            List<NearbyBlock> nearest_chest,
+            List<NearbyBlock> nearest_bed,
+            List<NearbyEntity> nearest_hostile
+    ) {
     }
 
     public record NearbyEntity(String type, double x, double y, double z, double distance, boolean hostile, float hp) {
