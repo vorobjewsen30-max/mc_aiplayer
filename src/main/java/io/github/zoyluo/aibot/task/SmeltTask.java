@@ -2,11 +2,14 @@ package io.github.zoyluo.aibot.task;
 
 import io.github.zoyluo.aibot.action.ActionResult;
 import io.github.zoyluo.aibot.action.BuildAction;
+import io.github.zoyluo.aibot.action.ContainerAction;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
+import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -31,6 +34,7 @@ public final class SmeltTask extends AbstractTask {
     }
 
     private static final Map<Item, Integer> FUEL_TICKS = new LinkedHashMap<>();
+    private static final int BASE_FUEL_RADIUS = 8;
 
     static {
         FUEL_TICKS.put(Items.COAL, 1600);
@@ -110,8 +114,8 @@ public final class SmeltTask extends AbstractTask {
     }
 
     private void findFurnace(AIPlayerEntity bot) {
-        if (!InventoryAction.hasItems(bot, input, targetCount)) {
-            fail("missing " + Registries.ITEM.getId(input) + " x" + targetCount);
+        if (!InventoryAction.hasItems(bot, input, 1)) {
+            fail("missing " + Registries.ITEM.getId(input) + " x1");
             return;
         }
         furnacePos = nearestFurnace(bot).orElse(null);
@@ -187,30 +191,46 @@ public final class SmeltTask extends AbstractTask {
             fail("furnace_input_occupied: " + Registries.ITEM.getId(inputSlot.getItem()));
             return;
         }
-        int remaining = targetCount - collected;
-        int inputToLoad = Math.min(remaining, inputSlot.isEmpty() ? 64 : 64 - inputSlot.getCount());
-        if (inputToLoad <= 0) {
-            fail("furnace_input_full");
+        ItemStack outputSlot = furnace.getStack(2);
+        if (!outputSlot.isEmpty() && !outputSlot.isOf(output)) {
+            fail("unexpected_output: " + Registries.ITEM.getId(outputSlot.getItem()));
+            return;
+        }
+        int outputQueued = outputSlot.isOf(output) ? outputSlot.getCount() : 0;
+        int inputQueued = inputSlot.isOf(input) ? inputSlot.getCount() : 0;
+        int remainingToQueue = targetCount - collected - outputQueued - inputQueued;
+        int inputRoom = inputSlot.isEmpty() ? 64 : 64 - inputSlot.getCount();
+        int inventoryInput = InventoryAction.countItem(bot, input);
+        int inputToLoad = Math.min(Math.min(remainingToQueue, inputRoom), inventoryInput);
+        if (remainingToQueue > 0 && inputToLoad <= 0 && inputQueued == 0) {
+            fail("missing " + Registries.ITEM.getId(input) + " x" + remainingToQueue);
             return;
         }
         ItemStack fuelSlot = furnace.getStack(1);
         FuelChoice fuel = null;
         if (fuelSlot.isEmpty()) {
-            fuel = chooseFuel(bot, inputToLoad);
+            int smeltsNeedingFuel = Math.max(1, inputQueued + Math.max(inputToLoad, 0));
+            fuel = chooseFuel(bot, smeltsNeedingFuel);
             if (fuel == null) {
-                fail("missing_fuel");
+                fetchFuelFromBase(bot, smeltsNeedingFuel);
+                fuel = chooseFuel(bot, smeltsNeedingFuel);
+            }
+            if (fuel == null) {
+                fail("out_of_fuel");
                 return;
             }
         }
-        if (!InventoryAction.removeItems(bot, input, inputToLoad)) {
-            fail("missing " + Registries.ITEM.getId(input) + " x" + inputToLoad);
-            return;
+        if (inputToLoad > 0) {
+            if (!InventoryAction.removeItems(bot, input, inputToLoad)) {
+                fail("missing " + Registries.ITEM.getId(input) + " x" + inputToLoad);
+                return;
+            }
+            furnace.setStack(0, new ItemStack(input, inputSlot.getCount() + inputToLoad));
         }
-        furnace.setStack(0, new ItemStack(input, inputSlot.getCount() + inputToLoad));
 
         if (fuel != null) {
             if (!InventoryAction.removeItems(bot, fuel.item(), fuel.count())) {
-                fail("missing_fuel: " + Registries.ITEM.getId(fuel.item()));
+                fail("out_of_fuel: " + Registries.ITEM.getId(fuel.item()));
                 return;
             }
             furnace.setStack(1, new ItemStack(fuel.item(), fuel.count()));
@@ -232,6 +252,12 @@ public final class SmeltTask extends AbstractTask {
         }
         if (!outputSlot.isEmpty()) {
             phase = Phase.COLLECTING;
+            return;
+        }
+        ItemStack inputSlot = furnace.getStack(0);
+        ItemStack fuelSlot = furnace.getStack(1);
+        if (collected < targetCount && (inputSlot.isEmpty() || fuelSlot.isEmpty())) {
+            phase = Phase.LOADING;
         }
     }
 
@@ -262,7 +288,7 @@ public final class SmeltTask extends AbstractTask {
         if (collected >= targetCount) {
             complete();
         } else {
-            phase = Phase.SMELTING;
+            phase = Phase.LOADING;
         }
     }
 
@@ -313,6 +339,57 @@ public final class SmeltTask extends AbstractTask {
             return new FuelChoice(entry.getKey(), needed);
         }
         return null;
+    }
+
+    private static void fetchFuelFromBase(AIPlayerEntity bot, int smeltCount) {
+        BlockPos base = BotMemoryStore.INSTANCE.of(bot.getUuid())
+                .placeIn(bot.getServerWorld(), "base")
+                .orElse(null);
+        if (base == null) {
+            return;
+        }
+        for (Map.Entry<Item, Integer> entry : FUEL_TICKS.entrySet()) {
+            Item fuel = entry.getKey();
+            int needed = divideRoundUp(smeltCount * 200, entry.getValue());
+            if (InventoryAction.countItem(bot, fuel) >= needed) {
+                return;
+            }
+            for (BlockPos pos : fuelContainers(bot, base, fuel)) {
+                Inventory container = ContainerAction.resolve(bot, pos).orElse(null);
+                if (container == null) {
+                    continue;
+                }
+                int missing = needed - InventoryAction.countItem(bot, fuel);
+                if (missing <= 0) {
+                    return;
+                }
+                ContainerAction.TransferResult result = ContainerAction.withdrawOne(container, bot, fuel, missing);
+                if (result.movedAny() && InventoryAction.countItem(bot, fuel) >= needed) {
+                    return;
+                }
+            }
+        }
+    }
+
+    private static java.util.List<BlockPos> fuelContainers(AIPlayerEntity bot, BlockPos base, Item fuel) {
+        return BlockPos.stream(base.add(-BASE_FUEL_RADIUS, -3, -BASE_FUEL_RADIUS), base.add(BASE_FUEL_RADIUS, 4, BASE_FUEL_RADIUS))
+                .map(BlockPos::toImmutable)
+                .filter(pos -> containsItem(bot, pos, fuel))
+                .sorted(Comparator.comparingDouble(pos -> pos.getSquaredDistance(bot.getBlockPos())))
+                .toList();
+    }
+
+    private static boolean containsItem(AIPlayerEntity bot, BlockPos pos, Item item) {
+        Inventory inventory = ContainerAction.resolve(bot, pos).orElse(null);
+        if (inventory == null) {
+            return false;
+        }
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            if (inventory.getStack(slot).isOf(item)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static int divideRoundUp(int value, int divisor) {

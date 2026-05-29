@@ -143,7 +143,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 **改动**:`keepTending` 强化:成熟才收、收后补种、周期性入 base、补种后余种入箱(自给);等待成熟阶段 `isWaiting()` 豁免 RL-3。
 **验收**:`farm <area> wheat keep_tending` → 长期 收-补种-入箱-留种 循环。
 
-## WO-RL-16 · 冶炼队列(批量/多炉/续料)  (PLAN §RL-16)
+## WO-RL-16 · 冶炼队列(批量/多炉/续料)  (PLAN §RL-16) ✅ done: SmeltTask 支持单炉批量续装/续燃料/收集循环, 燃料可从背包或 base 箱补, compileJava/compileClientJava 通过。
 **文件**:新 `task/SmeltQueueTask`(或扩 `SmeltTask`),复用 `SmeltTask` 炉操作 + `FUEL_TICKS`
 **改动**:大 `count` 分批装料 + 燃料不足自动从背包/base 补;先单炉大批量 + 自动续燃料,多炉为增强;G3 直接 `AbstractFurnaceBlockEntity`;等待阶段 `isWaiting()` 豁免。
 **验收**:`smelt minecraft:raw_iron minecraft:iron_ingot 32` → 续燃料烧完产 32。
