@@ -9,6 +9,8 @@ public enum LogCategory {
     PATH,
     TASK,
     DANGER,
+    PROFILE,
+    REPLAY,
     ERROR,
     CONFIG
 }

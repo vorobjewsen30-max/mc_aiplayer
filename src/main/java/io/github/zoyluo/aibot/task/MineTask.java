@@ -1,6 +1,7 @@
 package io.github.zoyluo.aibot.task;
 
 import io.github.zoyluo.aibot.action.MiningAction;
+import io.github.zoyluo.aibot.action.ToolSelector;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import net.minecraft.block.Block;
 import net.minecraft.entity.ItemEntity;
@@ -26,6 +27,7 @@ public final class MineTask extends AbstractTask {
     private int countSoFar;
     private int inventoryCountBeforeMining;
     private int pickupTicks;
+    private boolean directMiningTarget;
 
     public MineTask(Block targetBlock, int countNeeded) {
         this.targetBlock = targetBlock;
@@ -68,22 +70,25 @@ public final class MineTask extends AbstractTask {
 
     private void search(AIPlayerEntity bot) {
         BlockPos origin = bot.getBlockPos();
-        targetPos = BlockPos.stream(origin.add(-8, -4, -8), origin.add(8, 6, 8))
+        TargetChoice choice = BlockPos.stream(origin.add(-8, -4, -8), origin.add(8, 6, 8))
                 .filter(pos -> bot.getServerWorld().getBlockState(pos).isOf(targetBlock))
                 .map(BlockPos::toImmutable)
-                .min(Comparator.comparingDouble(pos -> pos.getSquaredDistance(origin)))
+                .map(pos -> targetChoice(bot, pos))
+                .filter(choiceCandidate -> choiceCandidate != null)
+                .min(Comparator.comparingDouble(choiceCandidate -> choiceCandidate.pos().getSquaredDistance(origin)))
                 .orElse(null);
-        if (targetPos == null) {
-            fail("no_target_block_in_range");
+        if (choice == null) {
+            fail("no_reachable_target_block_in_range");
             return;
         }
-        BlockPos stand = adjacentStandPos(bot, targetPos);
-        if (stand == null) {
-            fail("no_adjacent_standable");
+        targetPos = choice.pos();
+        directMiningTarget = choice.direct();
+        if (directMiningTarget) {
+            startMiningTarget(bot);
             return;
         }
         phase = Phase.MOVING;
-        bot.getActionPack().startPathTo(stand);
+        bot.getActionPack().startPathTo(choice.stand());
     }
 
     private void move(AIPlayerEntity bot) {
@@ -91,11 +96,9 @@ public final class MineTask extends AbstractTask {
             phase = Phase.SEARCHING;
             return;
         }
-        if (bot.getEyePos().distanceTo(targetPos.toCenterPos()) <= 4.5D) {
+        if (canReach(bot, targetPos)) {
             bot.getActionPack().stopAll();
-            inventoryCountBeforeMining = totalInventoryCount(bot);
-            MiningAction.startMining(bot, targetPos, Direction.getFacing(bot.getEyePos().subtract(targetPos.toCenterPos())));
-            phase = Phase.MINING;
+            startMiningTarget(bot);
             return;
         }
         if (bot.getActionPack().isPathExecutorIdle()) {
@@ -111,6 +114,7 @@ public final class MineTask extends AbstractTask {
         }
         if (bot.getActionPack().isMiningIdle() && elapsed % 200 == 0) {
             inventoryCountBeforeMining = totalInventoryCount(bot);
+            ToolSelector.equipBestTool(bot, bot.getServerWorld().getBlockState(targetPos));
             MiningAction.startMining(bot, targetPos, Direction.getFacing(bot.getEyePos().subtract(targetPos.toCenterPos())));
         }
     }
@@ -132,7 +136,7 @@ public final class MineTask extends AbstractTask {
                 .min(Comparator.comparingDouble(entity -> entity.distanceTo(bot)))
                 .ifPresent(item -> {
                     if (bot.distanceTo(item) > 1.5F && bot.getActionPack().isPathExecutorIdle()) {
-                        bot.getActionPack().startPathTo(item.getBlockPos());
+                        bot.getActionPack().startPathTo(pickupStandPos(bot, item.getBlockPos()));
                     }
                 });
         if (pickupTicks <= 0) {
@@ -148,6 +152,46 @@ public final class MineTask extends AbstractTask {
             }
         }
         return null;
+    }
+
+    private static BlockPos pickupStandPos(AIPlayerEntity bot, BlockPos itemPos) {
+        if (io.github.zoyluo.aibot.pathfinding.Standability.isStandable(bot.getServerWorld(), itemPos)) {
+            return itemPos;
+        }
+        BlockPos stand = adjacentStandPos(bot, itemPos);
+        return stand == null ? itemPos : stand;
+    }
+
+    private static boolean canReach(AIPlayerEntity bot, BlockPos target) {
+        return bot.getEyePos().distanceTo(target.toCenterPos()) <= 4.5D;
+    }
+
+    private static boolean canDirectMine(AIPlayerEntity bot, BlockPos target) {
+        return target.getY() >= bot.getBlockY() && canReach(bot, target);
+    }
+
+    private static TargetChoice targetChoice(AIPlayerEntity bot, BlockPos target) {
+        if (target.getY() < bot.getBlockY()) {
+            return null;
+        }
+        if (canDirectMine(bot, target)) {
+            return new TargetChoice(target, null, true);
+        }
+        BlockPos stand = adjacentStandPos(bot, target);
+        if (stand == null) {
+            return null;
+        }
+        return new TargetChoice(target, stand, false);
+    }
+
+    private void startMiningTarget(AIPlayerEntity bot) {
+        inventoryCountBeforeMining = totalInventoryCount(bot);
+        ToolSelector.equipBestTool(bot, bot.getServerWorld().getBlockState(targetPos));
+        MiningAction.startMining(bot, targetPos, Direction.getFacing(bot.getEyePos().subtract(targetPos.toCenterPos())));
+        phase = Phase.MINING;
+    }
+
+    private record TargetChoice(BlockPos pos, BlockPos stand, boolean direct) {
     }
 
     private static int totalInventoryCount(AIPlayerEntity bot) {

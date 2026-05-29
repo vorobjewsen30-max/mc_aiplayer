@@ -17,6 +17,7 @@ public final class MiningController {
     private final BlockPos pos;
     private final Direction face;
     private boolean started;
+    private BlockState targetState;
     private float progress;
     private int elapsed;
 
@@ -30,8 +31,11 @@ public final class MiningController {
         var world = player.getServerWorld();
         BlockState state = world.getBlockState(pos);
         if (state.isAir()) {
-            world.setBlockBreakingInfo(player.getId(), pos, -1);
+            resetProgress(player);
             return ActionResult.SUCCESS;
+        }
+        if (targetState != null && !state.equals(targetState)) {
+            resetProgress(player);
         }
 
         LookAction.lookAtBlock(player, pos, face);
@@ -42,6 +46,7 @@ public final class MiningController {
         }
 
         if (!started) {
+            ToolSelector.equipBestTool(player, state);
             BotLog.action(player, "mine_start", "pos", LogFields.pos(pos), "face", face);
             player.interactionManager.processBlockBreakingAction(
                     pos,
@@ -51,6 +56,7 @@ public final class MiningController {
                     -1);
             state.onBlockBreakStart(world, pos, player);
             started = true;
+            targetState = state;
         }
 
         progress += state.calcBlockBreakingDelta(player, world, pos);
@@ -89,5 +95,24 @@ public final class MiningController {
                 -1);
         player.getServerWorld().setBlockBreakingInfo(player.getId(), pos, -1);
         started = false;
+        targetState = null;
+        progress = 0.0F;
+        elapsed = 0;
+    }
+
+    private void resetProgress(AIPlayerEntity player) {
+        if (started) {
+            player.interactionManager.processBlockBreakingAction(
+                    pos,
+                    PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK,
+                    face,
+                    World.MAX_Y,
+                    -1);
+        }
+        player.getServerWorld().setBlockBreakingInfo(player.getId(), pos, -1);
+        started = false;
+        targetState = null;
+        progress = 0.0F;
+        elapsed = 0;
     }
 }

@@ -16,6 +16,9 @@
   "entrypoints": {
     "main": [
       "io.github.zoyluo.aibot.AIBotMod"
+    ],
+    "client": [
+      "io.github.zoyluo.aibot.client.AIBotClient"
     ]
   },
   "mixins": [

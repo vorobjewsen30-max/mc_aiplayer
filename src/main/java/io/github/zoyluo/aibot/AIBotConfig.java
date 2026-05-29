@@ -17,7 +17,11 @@ public record AIBotConfig(
         DeepSeek deepseek,
         Perception perception,
         Brain brain,
-        Logging logging
+        Logging logging,
+        Survival survival,
+        Combat combat,
+        Night night,
+        Mining mining
 ) {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static AIBotConfig instance = defaults();
@@ -62,7 +66,7 @@ public record AIBotConfig(
     }
 
     public AIBotConfig withDeepSeek(DeepSeek deepseek) {
-        return new AIBotConfig(deepseek, perception(), brain(), logging());
+        return new AIBotConfig(deepseek, perception(), brain(), logging(), survival(), combat(), night(), mining());
     }
 
     private AIBotConfig withDefaults() {
@@ -71,14 +75,18 @@ public record AIBotConfig(
                 deepseek == null ? defaults.deepseek : deepseek.withDefaults(defaults.deepseek),
                 perception == null ? defaults.perception : perception.withDefaults(defaults.perception),
                 brain == null ? defaults.brain : brain.withDefaults(defaults.brain),
-                logging == null ? defaults.logging : logging.withDefaults(defaults.logging));
+                logging == null ? defaults.logging : logging.withDefaults(defaults.logging),
+                survival == null ? defaults.survival : survival.withDefaults(defaults.survival),
+                combat == null ? defaults.combat : combat.withDefaults(defaults.combat),
+                night == null ? defaults.night : night.withDefaults(defaults.night),
+                mining == null ? defaults.mining : mining.withDefaults(defaults.mining));
     }
 
     public static AIBotConfig defaults() {
         return new AIBotConfig(
                 new DeepSeek("", "https://api.deepseek.com", "deepseek-chat", 2048, 0.3D, 60, 3, 500),
                 new Perception(16, 20, 10, 10),
-                new Brain(20, 6, 5),
+                new Brain(36, 6, 24),
                 new Logging(true, "logs/aibot", true, "daily", 50, 30, true, Map.of(
                         "LIFECYCLE", "INFO",
                         "COMM", "INFO",
@@ -89,7 +97,11 @@ public record AIBotConfig(
                         "TASK", "INFO",
                         "DANGER", "INFO",
                         "ERROR", "ERROR",
-                        "CONFIG", "INFO")));
+                        "CONFIG", "INFO")),
+                new Survival(14, 6),
+                new Combat(10, 2),
+                new Night(true, 8),
+                new Mining(2, 0.10D, true));
     }
 
     public record DeepSeek(
@@ -134,7 +146,38 @@ public record AIBotConfig(
             return new Brain(
                     positiveOrDefault(maxHistoryMessages, defaults.maxHistoryMessages),
                     positiveOrDefault(maxToolCallsPerTurn, defaults.maxToolCallsPerTurn),
-                    positiveOrDefault(maxTurnsPerRequest, defaults.maxTurnsPerRequest));
+                    Math.max(positiveOrDefault(maxTurnsPerRequest, defaults.maxTurnsPerRequest), defaults.maxTurnsPerRequest));
+        }
+    }
+
+    public record Survival(int hungerEatThreshold, int hungerCriticalThreshold) {
+        Survival withDefaults(Survival defaults) {
+            return new Survival(
+                    positiveOrDefault(hungerEatThreshold, defaults.hungerEatThreshold),
+                    positiveOrDefault(hungerCriticalThreshold, defaults.hungerCriticalThreshold));
+        }
+    }
+
+    public record Combat(int retreatHp, int maxEnemiesToFight) {
+        Combat withDefaults(Combat defaults) {
+            return new Combat(
+                    positiveOrDefault(retreatHp, defaults.retreatHp),
+                    positiveOrDefault(maxEnemiesToFight, defaults.maxEnemiesToFight));
+        }
+    }
+
+    public record Night(boolean autoSleep, int torchLightThreshold) {
+        Night withDefaults(Night defaults) {
+            return new Night(autoSleep, positiveOrDefault(torchLightThreshold, defaults.torchLightThreshold));
+        }
+    }
+
+    public record Mining(int returnWhenFreeSlots, double toolDurabilityFloor, boolean placeTorches) {
+        Mining withDefaults(Mining defaults) {
+            return new Mining(
+                    positiveOrDefault(returnWhenFreeSlots, defaults.returnWhenFreeSlots),
+                    toolDurabilityFloor > 0.0D ? toolDurabilityFloor : defaults.toolDurabilityFloor,
+                    placeTorches);
         }
     }
 

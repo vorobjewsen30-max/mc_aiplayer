@@ -37,6 +37,12 @@ public final class PathExecutor {
         totalTicks++;
         if (path.isEmpty() || index >= path.size()) {
             cleanup(pack);
+            double distSq = pack.player().getBlockPos().getSquaredDistance(originalGoal);
+            if (distSq > 4.0D) {
+                BotLog.warn(LogCategory.PATH, pack.player(), "path_end_far_from_goal",
+                        "dist_sq", distSq, "goal", LogFields.pos(originalGoal));
+                return ActionResult.failed("ended_far_from_goal dist_sq=" + (int) distSq);
+            }
             return ActionResult.SUCCESS;
         }
 
@@ -83,8 +89,9 @@ public final class PathExecutor {
     private ActionResult tickDigThrough(ActionPack pack, Node next) {
         if (!digWalking) {
             if (subMiner == null) {
-                LookAction.lookAtBlock(pack.player(), next.pos(), faceFromPlayer(pack, next.pos()));
-                subMiner = new MiningController(next.pos(), faceFromPlayer(pack, next.pos()));
+                Direction face = faceFromPlayer(pack, next.pos());
+                LookAction.lookAtBlock(pack.player(), next.pos(), face);
+                subMiner = new MiningController(next.pos(), face);
             }
             ActionResult mine = subMiner.tick(pack);
             if (mine.isFailed()) {
@@ -167,7 +174,16 @@ public final class PathExecutor {
     }
 
     private static Direction faceFromPlayer(ActionPack pack, BlockPos pos) {
-        return Direction.getFacing(pack.player().getEyePos().subtract(pos.toCenterPos()));
+        Direction raw = Direction.getFacing(pack.player().getEyePos().subtract(pos.toCenterPos()));
+        if (raw == Direction.UP || raw == Direction.DOWN) {
+            double dx = pack.player().getX() - (pos.getX() + 0.5D);
+            double dz = pack.player().getZ() - (pos.getZ() + 0.5D);
+            if (Math.abs(dx) >= Math.abs(dz)) {
+                return dx > 0.0D ? Direction.EAST : Direction.WEST;
+            }
+            return dz > 0.0D ? Direction.SOUTH : Direction.NORTH;
+        }
+        return raw;
     }
 
     private static String compact(BlockPos pos) {

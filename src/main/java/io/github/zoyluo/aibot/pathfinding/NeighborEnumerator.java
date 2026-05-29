@@ -71,7 +71,8 @@ public final class NeighborEnumerator {
     }
 
     private static boolean hasHeadroom(ServerWorld world, BlockPos target) {
-        return world.getBlockState(target.up()).getCollisionShape(world, target.up()).isEmpty();
+        return world.getBlockState(target.up()).getCollisionShape(world, target.up()).isEmpty()
+                && world.getBlockState(target.up(2)).getCollisionShape(world, target.up(2)).isEmpty();
     }
 
     private static boolean isMineable(ServerWorld world, BlockPos pos) {

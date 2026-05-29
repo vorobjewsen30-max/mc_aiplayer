@@ -8,17 +8,11 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class Standability {
-    private static final int CACHE_LIMIT = 4096;
-    private static final Map<Long, Boolean> CACHE = new LinkedHashMap<>(CACHE_LIMIT, 0.75F, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<Long, Boolean> eldest) {
-            return size() > CACHE_LIMIT;
-        }
-    };
+    private static final Map<Long, Boolean> CACHE = new ConcurrentHashMap<>(4096);
 
     private Standability() {
     }
@@ -70,6 +64,10 @@ public final class Standability {
                 || state.isOf(Blocks.CACTUS)
                 || state.isOf(Blocks.MAGMA_BLOCK)
                 || state.isOf(Blocks.CAMPFIRE)
-                || state.isOf(Blocks.SOUL_CAMPFIRE);
+                || state.isOf(Blocks.SOUL_CAMPFIRE)
+                || state.isOf(Blocks.SWEET_BERRY_BUSH)
+                || state.isOf(Blocks.WITHER_ROSE)
+                || state.isOf(Blocks.POWDER_SNOW)
+                || state.isOf(Blocks.POINTED_DRIPSTONE);
     }
 }

@@ -3,6 +3,8 @@ package io.github.zoyluo.aibot.task;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.aibot.observe.BotProfiler;
+import io.github.zoyluo.aibot.observe.TpsGuard;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.Map;
@@ -23,6 +25,7 @@ public final class TaskManager {
 
     public void assign(AIPlayerEntity bot, Task task) {
         abort(bot);
+        bot.getActionPack().stopAll();
         active.put(bot.getUuid(), task);
         task.start(bot);
         lastStatus.put(bot.getUuid(), TaskStatus.from(task));
@@ -92,14 +95,24 @@ public final class TaskManager {
                 paused.remove(uuid);
                 continue;
             }
-            task.tick(bot.get());
+            AIPlayerEntity player = bot.get();
+            if (!isCritical(task) && !TpsGuard.INSTANCE.shouldTickNonCriticalTask(server)) {
+                BotProfiler.INSTANCE.record(player, "task_tick_skipped", 0L);
+                continue;
+            }
+            long started = System.nanoTime();
+            try {
+                task.tick(player);
+            } finally {
+                BotProfiler.INSTANCE.record(player, "task_tick", System.nanoTime() - started);
+            }
             lastStatus.put(uuid, TaskStatus.from(task));
             if (task.state() == TaskState.COMPLETED) {
                 active.remove(uuid);
-                BotLog.task(bot.get(), "task_completed", "name", task.name(), "elapsed_ticks", task.elapsedTicks());
+                BotLog.task(player, "task_completed", "name", task.name(), "elapsed_ticks", task.elapsedTicks());
             } else if (task.state() == TaskState.FAILED) {
                 active.remove(uuid);
-                BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.TASK, bot.get(), "task_failed",
+                BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.TASK, player, "task_failed",
                         "name", task.name(), "reason", task.failureReason(), "elapsed_ticks", task.elapsedTicks());
             }
         }
@@ -122,5 +135,9 @@ public final class TaskManager {
 
     public int activeCount() {
         return active.size();
+    }
+
+    private static boolean isCritical(Task task) {
+        return task instanceof EvadeTask || task instanceof CombatTask || task instanceof EatTask;
     }
 }

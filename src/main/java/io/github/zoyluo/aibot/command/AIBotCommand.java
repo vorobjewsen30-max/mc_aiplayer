@@ -23,7 +23,17 @@ public final class AIBotCommand {
                 .requires(source -> source.hasPermissionLevel(2))
                 .then(literal("spawn")
                         .then(argument("name", StringArgumentType.word())
-                                .executes(context -> spawn(context.getSource(), StringArgumentType.getString(context, "name")))))
+                                .executes(context -> spawn(context.getSource(), StringArgumentType.getString(context, "name"), "worker"))
+                                .then(argument("role", StringArgumentType.word())
+                                        .executes(context -> spawn(context.getSource(),
+                                                StringArgumentType.getString(context, "name"),
+                                                StringArgumentType.getString(context, "role"))))))
+                .then(literal("role")
+                        .then(argument("name", StringArgumentType.word())
+                                .then(argument("role", StringArgumentType.word())
+                                        .executes(context -> role(context.getSource(),
+                                                StringArgumentType.getString(context, "name"),
+                                                StringArgumentType.getString(context, "role"))))))
                 .then(literal("despawn")
                         .then(argument("name", StringArgumentType.word())
                                 .executes(context -> despawn(context.getSource(), StringArgumentType.getString(context, "name")))))
@@ -31,11 +41,17 @@ public final class AIBotCommand {
                         .executes(context -> list(context.getSource())))
                 .then(AIBotBrainSubcommand.build())
                 .then(AIBotLogSubcommand.build())
+                .then(AIBotPersistSubcommand.build())
+                .then(AIBotJobSubcommand.build())
+                .then(AIBotMemorySubcommand.build())
+                .then(AIBotObserveSubcommand.profile())
+                .then(AIBotObserveSubcommand.replay())
+                .then(AIBotObserveSubcommand.tps())
                 .then(AIBotTestSubcommand.build(registryAccess))
                 .then(AIBotTaskSubcommand.build()));
     }
 
-    private static int spawn(ServerCommandSource source, String name) {
+    private static int spawn(ServerCommandSource source, String name, String role) {
         ServerPlayerEntity executor = source.getPlayer();
         GameMode gameMode = executor == null ? GameMode.SURVIVAL : executor.interactionManager.getGameMode();
         var rotation = source.getRotation();
@@ -49,12 +65,24 @@ public final class AIBotCommand {
                 gameMode);
 
         if (spawned.isPresent()) {
-            source.sendFeedback(() -> Text.literal("[AIBot] Spawned " + name), true);
+            AIPlayerManager.INSTANCE.setRole(spawned.get(), role);
+            source.sendFeedback(() -> Text.literal("[AIBot] Spawned " + name + " role=" + AIPlayerManager.INSTANCE.role(spawned.get())), true);
             return 1;
         }
 
         source.sendError(Text.literal("[AIBot] Failed to spawn " + name + " (already exists?)"));
         return 0;
+    }
+
+    private static int role(ServerCommandSource source, String name, String role) {
+        var bot = AIPlayerManager.INSTANCE.getByName(name);
+        if (bot.isEmpty()) {
+            source.sendError(Text.literal("[AIBot] No such bot: " + name));
+            return 0;
+        }
+        AIPlayerManager.INSTANCE.setRole(bot.get(), role);
+        source.sendFeedback(() -> Text.literal("[AIBot] " + name + " role=" + AIPlayerManager.INSTANCE.role(bot.get())), false);
+        return 1;
     }
 
     private static int despawn(ServerCommandSource source, String name) {
@@ -71,7 +99,7 @@ public final class AIBotCommand {
     private static int list(ServerCommandSource source) {
         var bots = AIPlayerManager.INSTANCE.all();
         String names = bots.stream()
-                .map(player -> player.getGameProfile().getName())
+                .map(player -> player.getGameProfile().getName() + "(" + AIPlayerManager.INSTANCE.role(player) + ")")
                 .collect(Collectors.joining(", "));
         source.sendFeedback(() -> Text.literal("[AIBot] " + bots.size() + " bot(s): " + names), false);
         return bots.size();

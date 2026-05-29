@@ -31,6 +31,12 @@ public final class DangerCheck {
         if (below.isOf(Blocks.CACTUS)) {
             return "cactus_below";
         }
+        if (Standability.isDangerous(at)) {
+            return "danger_at";
+        }
+        if (Standability.isDangerous(below)) {
+            return "danger_below";
+        }
         return null;
     }
 }

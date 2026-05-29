@@ -2,21 +2,41 @@ package io.github.zoyluo.aibot.brain;
 
 import com.google.gson.JsonObject;
 import io.github.zoyluo.aibot.action.BuildAction;
+import io.github.zoyluo.aibot.action.EquipAction;
+import io.github.zoyluo.aibot.action.FarmAction;
 import io.github.zoyluo.aibot.action.InteractAction;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.action.LookAction;
 import io.github.zoyluo.aibot.action.MiningAction;
 import io.github.zoyluo.aibot.action.MovementAction;
+import io.github.zoyluo.aibot.action.ToolSelector;
+import io.github.zoyluo.aibot.coordination.Job;
+import io.github.zoyluo.aibot.coordination.TaskBoard;
+import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.aibot.memory.BotMemory;
+import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.task.BlueprintLoader;
+import io.github.zoyluo.aibot.task.BreedTask;
 import io.github.zoyluo.aibot.task.BuildTask;
+import io.github.zoyluo.aibot.task.CombatTask;
+import io.github.zoyluo.aibot.task.ContainerTask;
+import io.github.zoyluo.aibot.task.CraftTask;
+import io.github.zoyluo.aibot.task.EatTask;
 import io.github.zoyluo.aibot.task.ForageTask;
+import io.github.zoyluo.aibot.task.FarmTask;
+import io.github.zoyluo.aibot.task.LightAreaTask;
 import io.github.zoyluo.aibot.task.MineTask;
 import io.github.zoyluo.aibot.task.MoveTask;
+import io.github.zoyluo.aibot.task.SleepTask;
+import io.github.zoyluo.aibot.task.SmeltTask;
+import io.github.zoyluo.aibot.task.StripMineTask;
 import io.github.zoyluo.aibot.task.Task;
 import io.github.zoyluo.aibot.task.TaskManager;
 import io.github.zoyluo.aibot.task.TaskStatus;
 import net.minecraft.block.Block;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
+import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
@@ -24,10 +44,13 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 
 public final class ToolRegistry {
     private final Map<String, ToolDefinition> tools = new LinkedHashMap<>();
@@ -72,13 +95,13 @@ public final class ToolRegistry {
             return fail("path_and_walk_both_failed: " + pathResult.reason());
         });
 
-        register("mine_block", "Break the block at given coords. Bot must already be within reach.", xyzSchema(), (bot, args) -> {
+        register("mine_block", "Low-level single-block break at given coords. Bot must already be within reach. For gathering materials or mining counts, prefer assign_task with task_type mine.", xyzSchema(), (bot, args) -> {
             BlockPos pos = blockPos(args);
             MiningAction.startMining(bot, pos, Direction.getFacing(bot.getEyePos().subtract(pos.toCenterPos())));
             return ok("started");
         });
 
-        register("place_block", "Place the currently held block at given coords", xyzSchema(), (bot, args) -> {
+        register("place_block", "Low-level manual placement of the currently held block at given coords. For crafting table placement during recipes, prefer craft because it can place a held crafting table automatically.", xyzSchema(), (bot, args) -> {
             return result(BuildAction.placeBlockAt(bot, blockPos(args)));
         });
 
@@ -89,6 +112,192 @@ public final class ToolRegistry {
 
         register("inventory", "Get the bot's current inventory", objectSchema().build(), (bot, args) ->
                 ok(InventoryAction.summarize(bot).toString()));
+
+        register("equip_best_tool", "Equip the best available tool for breaking a block type", objectSchema()
+                .property("block", stringSchema("block id, for example minecraft:stone"))
+                .required("block")
+                .build(), (bot, args) -> {
+            Block block = requiredBlock(args, "block");
+            ToolSelector.Selection selection = ToolSelector.equipBestTool(bot, block.getDefaultState());
+            return ok(selection.describe());
+        });
+
+        register("craft", "Craft an item using known survival recipes. It resolves planks and sticks recursively, so prefer crafting the target tool/item directly instead of crafting planks or sticks as separate steps. It does not gather, smelt, or open GUIs. For 3x3 recipes, craft minecraft:crafting_table first; after that this task can use a nearby table or place a held table automatically. Do not use select_hotbar/place_block for the crafting table unless the human asks. Fails with need: <item> xN when base materials are missing.", objectSchema()
+                .property("item", stringSchema("item id, for example minecraft:stone_pickaxe"))
+                .property("count", integerSchema("desired count"))
+                .required("item")
+                .build(), (bot, args) -> {
+            Task task = new CraftTask(requiredItem(args, "item"), optionalInt(args, "count", 1));
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("eat", "Eat available food from inventory", objectSchema().build(), (bot, args) -> {
+            Task task = new EatTask();
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("smelt", "Smelt input items in a nearby or held furnace using available fuel. It does not craft a furnace; call craft first if needed.", objectSchema()
+                .property("input_item", stringSchema("input item id, for example minecraft:raw_iron"))
+                .property("output_item", stringSchema("expected output item id, for example minecraft:iron_ingot"))
+                .property("count", integerSchema("output count"))
+                .required("input_item")
+                .required("output_item")
+                .build(), (bot, args) -> {
+            Task task = new SmeltTask(
+                    requiredItem(args, "input_item"),
+                    requiredItem(args, "output_item"),
+                    optionalInt(args, "count", 1));
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("strip_mine", "Mine a 2-high branch tunnel in a direction. It checks water/lava/drop hazards before breaking blocks, follows ore veins, places torches, and can return to a depot chest when nearly full.", objectSchema()
+                .property("direction", stringSchema("north, south, east, or west"))
+                .property("length", integerSchema("main tunnel length"))
+                .property("spacing", integerSchema("branch spacing and branch depth"))
+                .property("depot_x", integerSchema("optional depot chest x"))
+                .property("depot_y", integerSchema("optional depot chest y"))
+                .property("depot_z", integerSchema("optional depot chest z"))
+                .property("target_ores", stringSchema("optional comma separated ore block ids; default is common ores"))
+                .build(), (bot, args) -> {
+            Task task = new StripMineTask(
+                    optionalDirection(args, "direction", Direction.NORTH),
+                    optionalInt(args, "length", 16),
+                    optionalInt(args, "spacing", 4),
+                    optionalBlockPos(args, "depot_x", "depot_y", "depot_z"),
+                    optionalBlocksCsv(args, "target_ores"));
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("mine_vein", "Mine the nearest visible ore vein in range using bounded BFS. Optional target_ores is a comma separated list of ore block ids.", objectSchema()
+                .property("target_ores", stringSchema("optional comma separated ore block ids; default is common ores"))
+                .build(), (bot, args) -> {
+            Task task = StripMineTask.mineNearbyVein(optionalBlocksCsv(args, "target_ores"));
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("find_container", "Find the nearest reachable inventory container such as a chest", objectSchema()
+                .property("radius", integerSchema("search radius"))
+                .build(), (bot, args) -> ContainerTask.nearestContainer(bot, optionalInt(args, "radius", 8))
+                .map(pos -> ok("{\"x\":" + pos.getX() + ",\"y\":" + pos.getY() + ",\"z\":" + pos.getZ() + "}"))
+                .orElseGet(() -> fail("no_container")));
+
+        register("deposit", "Deposit items into a nearby or specified container. Use all_except_tools=true to store surplus materials while keeping damageable tools/equipment.", objectSchema()
+                .property("item", stringSchema("optional item id to deposit, for example minecraft:cobblestone"))
+                .property("count", integerSchema("optional item count; omit or <=0 means all matching items"))
+                .property("all_except_tools", booleanSchema("deposit all non-damageable items"))
+                .property("chest_x", integerSchema("optional container x"))
+                .property("chest_y", integerSchema("optional container y"))
+                .property("chest_z", integerSchema("optional container z"))
+                .build(), (bot, args) -> {
+            Task task = ContainerTask.deposit(
+                    optionalBlockPos(args, "chest_x", "chest_y", "chest_z"),
+                    optionalItem(args, "item"),
+                    optionalInt(args, "count", 0),
+                    optionalBoolean(args, "all_except_tools", false));
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("withdraw", "Withdraw a specific item count from a nearby or specified container", objectSchema()
+                .property("item", stringSchema("item id to withdraw, for example minecraft:cobblestone"))
+                .property("count", integerSchema("count to withdraw"))
+                .property("chest_x", integerSchema("optional container x"))
+                .property("chest_y", integerSchema("optional container y"))
+                .property("chest_z", integerSchema("optional container z"))
+                .required("item")
+                .build(), (bot, args) -> {
+            Task task = ContainerTask.withdraw(
+                    optionalBlockPos(args, "chest_x", "chest_y", "chest_z"),
+                    requiredItem(args, "item"),
+                    optionalInt(args, "count", 1));
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("equip_armor", "Equip the best armor pieces from inventory and select the best weapon", objectSchema().build(), (bot, args) -> {
+            int equipped = EquipAction.equipBestArmor(bot);
+            EquipAction.equipBestWeapon(bot);
+            return ok("equipped_armor_pieces: " + equipped);
+        });
+
+        register("attack", "Start a deterministic combat task against nearby entities of a type. The bot equips armor and weapon, attacks on cooldown, and retreats at low health.", objectSchema()
+                .property("entity_type", stringSchema("entity type, for example minecraft:zombie"))
+                .property("count", integerSchema("number of kills"))
+                .required("entity_type")
+                .build(), (bot, args) -> {
+            Task task = new CombatTask(
+                    requiredEntityType(args, "entity_type"),
+                    optionalInt(args, "count", 1),
+                    io.github.zoyluo.aibot.AIBotConfig.get().combat().retreatHp());
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("sleep", "Find or place a bed, sleep through night, and wake up in the morning", objectSchema().build(), (bot, args) -> {
+            Task task = new SleepTask();
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("light_area", "Place torches around the bot where block light is below the configured threshold", objectSchema()
+                .property("radius", integerSchema("scan radius"))
+                .property("max_torches", integerSchema("maximum torches to place"))
+                .build(), (bot, args) -> {
+            Task task = new LightAreaTask(optionalInt(args, "radius", 8), optionalInt(args, "max_torches", 8));
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("farm", "Till soil, plant crops, harvest mature crops, and optionally keep tending the area. Supported crops: wheat, carrot, potato.", objectSchema()
+                .property("x", integerSchema("area center x"))
+                .property("y", integerSchema("area center y"))
+                .property("z", integerSchema("area center z"))
+                .property("radius", integerSchema("area radius"))
+                .property("crop", stringSchema("wheat, carrot, or potato"))
+                .property("keep_tending", booleanSchema("keep surveying instead of completing after one pass"))
+                .required("x")
+                .required("y")
+                .required("z")
+                .required("crop")
+                .build(), (bot, args) -> {
+            FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop"));
+            Task task = new FarmTask(blockPos(args), optionalInt(args, "radius", 3), spec.seed(), spec.crop(),
+                    optionalBoolean(args, "keep_tending", false), false);
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("harvest", "Harvest mature crops in an area without tilling or planting new empty soil. Supported crops: wheat, carrot, potato.", objectSchema()
+                .property("x", integerSchema("area center x"))
+                .property("y", integerSchema("area center y"))
+                .property("z", integerSchema("area center z"))
+                .property("radius", integerSchema("area radius"))
+                .property("crop", stringSchema("wheat, carrot, or potato"))
+                .required("x")
+                .required("y")
+                .required("z")
+                .required("crop")
+                .build(), (bot, args) -> {
+            FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop"));
+            Task task = new FarmTask(blockPos(args), optionalInt(args, "radius", 3), spec.seed(), spec.crop(), false, true);
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("breed", "Feed two nearby adult animals of the requested type to breed them. Supported examples: minecraft:cow, minecraft:sheep, minecraft:pig, minecraft:chicken.", objectSchema()
+                .property("entity_type", stringSchema("entity type, for example minecraft:cow"))
+                .property("pairs", integerSchema("number of pairs to breed"))
+                .required("entity_type")
+                .build(), (bot, args) -> {
+            Task task = new BreedTask(requiredEntityType(args, "entity_type"), optionalInt(args, "pairs", 1));
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
 
         register("attack_entity", "Attack a nearby entity by type", objectSchema()
                 .property("entity_type", stringSchema("entity type, for example minecraft:cow"))
@@ -111,8 +320,124 @@ public final class ToolRegistry {
             return ok("stopped");
         });
 
-        register("assign_task", "Start a high-level task for the bot. Supersedes any current task. Build params: blueprint plus anchor_x/anchor_y/anchor_z. x/y/z aliases are accepted.", objectSchema()
-                .property("task_type", stringSchema("move, forage, mine, or build"))
+        register("post_job", "Post a shared job to the multi-bot task board. Idle bots whose role matches the job role can claim and execute it.", objectSchema()
+                .property("kind", stringSchema("job kind, for example mine, build, craft, smelt, move, eat, or light_area"))
+                .property("role", stringSchema("bot role that should claim it, for example miner or builder; blank means any role"))
+                .property("params", objectSchema().build())
+                .required("kind")
+                .required("params")
+                .build(), (bot, args) -> {
+            UUID id = TaskBoard.INSTANCE.post(requiredString(args, "kind"), paramsObject(args, "params"), optionalString(args, "role", ""));
+            return ok("job_posted: " + id);
+        });
+
+        register("list_jobs", "List shared jobs on the multi-bot task board", objectSchema().build(), (bot, args) -> {
+            List<Job> jobs = TaskBoard.INSTANCE.snapshot();
+            if (jobs.isEmpty()) {
+                return ok("[]");
+            }
+            StringBuilder builder = new StringBuilder("[");
+            for (int index = 0; index < jobs.size(); index++) {
+                Job job = jobs.get(index);
+                if (index > 0) {
+                    builder.append(", ");
+                }
+                builder.append("{id=").append(job.id())
+                        .append(", kind=").append(job.kind())
+                        .append(", role=").append(job.role())
+                        .append(", status=").append(job.status())
+                        .append(", reason=").append(job.failureReason())
+                        .append("}");
+            }
+            builder.append("]");
+            return ok(builder.toString());
+        });
+
+        register("tell_bot", "Send a message from this bot to another bot's brain, reusing the normal @bot chat pathway.", objectSchema()
+                .property("target", stringSchema("target bot name"))
+                .property("message", stringSchema("message text"))
+                .required("target")
+                .required("message")
+                .build(), (bot, args) -> {
+            String targetName = requiredString(args, "target");
+            var target = AIPlayerManager.INSTANCE.getByName(targetName);
+            if (target.isEmpty()) {
+                return fail("no_such_bot: " + targetName);
+            }
+            boolean queued = BrainCoordinator.INSTANCE.handleMessage(target.get(), bot.getGameProfile().getName(), requiredString(args, "message"));
+            return queued ? ok("message_sent") : fail("target_busy");
+        });
+
+        register("remember", "Store a persistent per-bot fact by key. Use for user preferences, named facts, or long-lived notes.", objectSchema()
+                .property("key", stringSchema("memory key"))
+                .property("value", stringSchema("memory value"))
+                .required("key")
+                .required("value")
+                .build(), (bot, args) -> {
+            BotMemoryStore.INSTANCE.of(bot.getUuid()).remember(requiredString(args, "key"), requiredString(args, "value"));
+            return ok("remembered");
+        });
+
+        register("recall", "Recall a persistent fact by key", objectSchema()
+                .property("key", stringSchema("memory key"))
+                .required("key")
+                .build(), (bot, args) -> BotMemoryStore.INSTANCE.of(bot.getUuid())
+                .recall(requiredString(args, "key"))
+                .map(ToolRegistry::ok)
+                .orElseGet(() -> fail("missing_memory: " + requiredString(args, "key"))));
+
+        register("forget", "Delete a persistent fact by key", objectSchema()
+                .property("key", stringSchema("memory key"))
+                .required("key")
+                .build(), (bot, args) -> {
+            boolean removed = BotMemoryStore.INSTANCE.of(bot.getUuid()).forget(requiredString(args, "key"));
+            return ok("forgotten: " + removed);
+        });
+
+        register("mark_place", "Remember the bot's current block position as a named place", objectSchema()
+                .property("name", stringSchema("place name, for example home"))
+                .required("name")
+                .build(), (bot, args) -> {
+            BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace(requiredString(args, "name"), bot.getServerWorld(), bot.getBlockPos());
+            return ok("marked_place: " + requiredString(args, "name") + " at " + bot.getBlockPos().toShortString());
+        });
+
+        register("goto_place", "Assign a move task to a remembered named place in the current dimension", objectSchema()
+                .property("name", stringSchema("place name"))
+                .required("name")
+                .build(), (bot, args) -> {
+            Optional<BotMemory.Place> place = BotMemoryStore.INSTANCE.of(bot.getUuid()).place(requiredString(args, "name"));
+            if (place.isEmpty()) {
+                return fail("unknown_place: " + requiredString(args, "name"));
+            }
+            if (!bot.getServerWorld().getRegistryKey().getValue().toString().equals(place.get().dimension())) {
+                return fail("place_in_other_dimension: " + place.get().dimension());
+            }
+            Task task = new MoveTask(bot, place.get().pos());
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("set_goal", "Set a persistent long-term goal with ordered steps. Steps should be an array of short strings.", objectSchema()
+                .property("title", stringSchema("goal title"))
+                .property("steps", arrayOfStringsSchema("ordered goal steps"))
+                .required("title")
+                .required("steps")
+                .build(), (bot, args) -> {
+            List<String> steps = stringArray(args, "steps");
+            BotMemoryStore.INSTANCE.of(bot.getUuid()).setGoal(requiredString(args, "title"), steps);
+            return ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus(""));
+        });
+
+        register("advance_goal", "Advance the current persistent long-term goal by one step", objectSchema()
+                .property("result", stringSchema("short result of the completed step"))
+                .build(), (bot, args) -> ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).advanceGoal(optionalString(args, "result", ""))));
+
+        register("goal_status", "Get the current persistent long-term goal status", objectSchema().build(), (bot, args) ->
+                ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus("")));
+
+        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for mining/gathering/combat counts instead of low-level tools. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
+                .property("task_type", stringSchema("move, forage, attack, mine, strip_mine, mine_vein, build, craft, eat, smelt, sleep, light_area, farm, harvest, breed, deposit, or withdraw"))
                 .property("params", objectSchema().build())
                 .required("task_type")
                 .required("params")
@@ -143,20 +468,65 @@ public final class ToolRegistry {
         return switch (taskType) {
             case "move" -> new MoveTask(bot, new BlockPos(requiredInt(params, "x"), requiredInt(params, "y"), requiredInt(params, "z")));
             case "forage" -> new ForageTask(
-                    Registries.ENTITY_TYPE.get(Identifier.of(requiredString(params, "entity_type"))),
+                    requiredEntityType(params, "entity_type"),
                     optionalInt(params, "count", 1));
+            case "attack" -> new CombatTask(
+                    requiredEntityType(params, "entity_type"),
+                    optionalInt(params, "count", 1),
+                    io.github.zoyluo.aibot.AIBotConfig.get().combat().retreatHp());
             case "mine" -> {
-                Block block = Registries.BLOCK.get(Identifier.of(requiredString(params, "block")));
+                Block block = blockWithAlias(params, "block", "block_type");
                 yield new MineTask(block, optionalInt(params, "count", 1));
             }
+            case "craft" -> new CraftTask(requiredItem(params, "item"), optionalInt(params, "count", 1));
+            case "eat" -> new EatTask();
+            case "sleep" -> new SleepTask();
+            case "light_area" -> new LightAreaTask(optionalInt(params, "radius", 8), optionalInt(params, "max_torches", 8));
+            case "farm" -> {
+                FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(params, "crop"));
+                yield new FarmTask(blockPos(params), optionalInt(params, "radius", 3), spec.seed(), spec.crop(),
+                        optionalBoolean(params, "keep_tending", false), false);
+            }
+            case "harvest" -> {
+                FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(params, "crop"));
+                yield new FarmTask(blockPos(params), optionalInt(params, "radius", 3), spec.seed(), spec.crop(), false, true);
+            }
+            case "breed" -> new BreedTask(requiredEntityType(params, "entity_type"), optionalInt(params, "pairs", 1));
+            case "smelt" -> new SmeltTask(
+                    requiredItem(params, "input_item"),
+                    requiredItem(params, "output_item"),
+                    optionalInt(params, "count", 1));
+            case "strip_mine" -> new StripMineTask(
+                    optionalDirection(params, "direction", Direction.NORTH),
+                    optionalInt(params, "length", 16),
+                    optionalInt(params, "spacing", 4),
+                    optionalBlockPos(params, "depot_x", "depot_y", "depot_z"),
+                    optionalBlocksCsv(params, "target_ores"));
+            case "mine_vein" -> StripMineTask.mineNearbyVein(optionalBlocksCsv(params, "target_ores"));
+            case "deposit" -> ContainerTask.deposit(
+                    optionalBlockPos(params, "chest_x", "chest_y", "chest_z"),
+                    optionalItem(params, "item"),
+                    optionalInt(params, "count", 0),
+                    optionalBoolean(params, "all_except_tools", false));
+            case "withdraw" -> ContainerTask.withdraw(
+                    optionalBlockPos(params, "chest_x", "chest_y", "chest_z"),
+                    requiredItem(params, "item"),
+                    optionalInt(params, "count", 1));
             case "build" -> {
                 try {
-                    yield new BuildTask(
-                            BlueprintLoader.load(requiredString(params, "blueprint")),
-                            new BlockPos(
+                    boolean autoSite = optionalBoolean(params, "auto_site", false);
+                    boolean flatten = optionalBoolean(params, "flatten", false);
+                    BlockPos anchor = autoSite && !hasBlockPos(params, "anchor_x", "anchor_y", "anchor_z") && !hasBlockPos(params, "x", "y", "z")
+                            ? null
+                            : new BlockPos(
                                     intWithAlias(params, "anchor_x", "x"),
                                     intWithAlias(params, "anchor_y", "y"),
-                                    intWithAlias(params, "anchor_z", "z")));
+                                    intWithAlias(params, "anchor_z", "z"));
+                    yield new BuildTask(
+                            BlueprintLoader.load(requiredString(params, "blueprint")),
+                            anchor,
+                            autoSite,
+                            flatten);
                 } catch (java.io.IOException exception) {
                     throw new IllegalArgumentException(exception.getMessage(), exception);
                 }
@@ -219,6 +589,130 @@ public final class ToolRegistry {
         return args.get(name).getAsInt();
     }
 
+    private static boolean optionalBoolean(JsonObject args, String name, boolean defaultValue) {
+        if (!args.has(name) || !args.get(name).isJsonPrimitive()) {
+            return defaultValue;
+        }
+        return args.get(name).getAsBoolean();
+    }
+
+    private static String optionalString(JsonObject args, String name, String defaultValue) {
+        if (!args.has(name) || !args.get(name).isJsonPrimitive()) {
+            return defaultValue;
+        }
+        String value = args.get(name).getAsString();
+        return value == null || value.isBlank() ? defaultValue : value;
+    }
+
+    private static List<String> stringArray(JsonObject args, String name) {
+        if (!args.has(name) || !args.get(name).isJsonArray()) {
+            throw new IllegalArgumentException("missing_or_bad_arg: " + name);
+        }
+        java.util.ArrayList<String> values = new java.util.ArrayList<>();
+        for (com.google.gson.JsonElement element : args.getAsJsonArray(name)) {
+            if (!element.isJsonPrimitive()) {
+                throw new IllegalArgumentException("missing_or_bad_arg: " + name);
+            }
+            String value = element.getAsString();
+            if (value != null && !value.isBlank()) {
+                values.add(value.trim());
+            }
+        }
+        if (values.isEmpty()) {
+            throw new IllegalArgumentException("missing_or_bad_arg: " + name);
+        }
+        return values;
+    }
+
+    private static Map<String, String> paramsObject(JsonObject args, String name) {
+        if (!args.has(name) || !args.get(name).isJsonObject()) {
+            return Map.of();
+        }
+        Map<String, String> params = new LinkedHashMap<>();
+        for (Map.Entry<String, com.google.gson.JsonElement> entry : args.getAsJsonObject(name).entrySet()) {
+            if (entry.getValue().isJsonPrimitive()) {
+                params.put(entry.getKey(), entry.getValue().getAsString());
+            }
+        }
+        return params;
+    }
+
+    private static BlockPos optionalBlockPos(JsonObject args, String xName, String yName, String zName) {
+        if (!args.has(xName) && !args.has(yName) && !args.has(zName)) {
+            return null;
+        }
+        return new BlockPos(requiredInt(args, xName), requiredInt(args, yName), requiredInt(args, zName));
+    }
+
+    private static boolean hasBlockPos(JsonObject args, String xName, String yName, String zName) {
+        return args.has(xName) && args.has(yName) && args.has(zName);
+    }
+
+    private static Block requiredBlock(JsonObject args, String name) {
+        Identifier id = Identifier.of(requiredString(args, name));
+        return Registries.BLOCK.getOptionalValue(id)
+                .orElseThrow(() -> new IllegalArgumentException("unknown_block: " + id));
+    }
+
+    private static Block blockWithAlias(JsonObject args, String primary, String alias) {
+        if (args.has(primary) && args.get(primary).isJsonPrimitive()) {
+            return requiredBlock(args, primary);
+        }
+        if (args.has(alias) && args.get(alias).isJsonPrimitive()) {
+            return requiredBlock(args, alias);
+        }
+        throw new IllegalArgumentException("missing_or_bad_arg: " + primary);
+    }
+
+    private static Item requiredItem(JsonObject args, String name) {
+        Identifier id = Identifier.of(requiredString(args, name));
+        return Registries.ITEM.getOptionalValue(id)
+                .orElseThrow(() -> new IllegalArgumentException("unknown_item: " + id));
+    }
+
+    private static Item optionalItem(JsonObject args, String name) {
+        if (!args.has(name) || !args.get(name).isJsonPrimitive() || args.get(name).getAsString().isBlank()) {
+            return null;
+        }
+        return requiredItem(args, name);
+    }
+
+    private static EntityType<?> requiredEntityType(JsonObject args, String name) {
+        Identifier id = Identifier.of(requiredString(args, name));
+        return Registries.ENTITY_TYPE.getOptionalValue(id)
+                .orElseThrow(() -> new IllegalArgumentException("unknown_entity_type: " + id));
+    }
+
+    private static Direction optionalDirection(JsonObject args, String name, Direction defaultValue) {
+        if (!args.has(name) || !args.get(name).isJsonPrimitive() || args.get(name).getAsString().isBlank()) {
+            return defaultValue;
+        }
+        return switch (args.get(name).getAsString().toLowerCase(java.util.Locale.ROOT)) {
+            case "north", "n" -> Direction.NORTH;
+            case "south", "s" -> Direction.SOUTH;
+            case "east", "e" -> Direction.EAST;
+            case "west", "w" -> Direction.WEST;
+            default -> throw new IllegalArgumentException("unknown_direction: " + args.get(name).getAsString());
+        };
+    }
+
+    private static Set<Block> optionalBlocksCsv(JsonObject args, String name) {
+        if (!args.has(name) || !args.get(name).isJsonPrimitive() || args.get(name).getAsString().isBlank()) {
+            return Set.of();
+        }
+        Set<Block> blocks = new HashSet<>();
+        for (String token : args.get(name).getAsString().split(",")) {
+            String trimmed = token.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            Identifier id = Identifier.of(trimmed);
+            blocks.add(Registries.BLOCK.getOptionalValue(id)
+                    .orElseThrow(() -> new IllegalArgumentException("unknown_block: " + id)));
+        }
+        return blocks;
+    }
+
     private static String escape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
@@ -241,6 +735,16 @@ public final class ToolRegistry {
         return schema;
     }
 
+    private static JsonObject arrayOfStringsSchema(String description) {
+        JsonObject schema = new JsonObject();
+        schema.addProperty("type", "array");
+        schema.addProperty("description", description);
+        JsonObject items = new JsonObject();
+        items.addProperty("type", "string");
+        schema.add("items", items);
+        return schema;
+    }
+
     private static JsonObject integerSchema(String description) {
         JsonObject schema = new JsonObject();
         schema.addProperty("type", "integer");
@@ -252,6 +756,13 @@ public final class ToolRegistry {
         JsonObject schema = integerSchema(description);
         schema.addProperty("minimum", min);
         schema.addProperty("maximum", max);
+        return schema;
+    }
+
+    private static JsonObject booleanSchema(String description) {
+        JsonObject schema = new JsonObject();
+        schema.addProperty("type", "boolean");
+        schema.addProperty("description", description);
         return schema;
     }
 

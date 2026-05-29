@@ -7,6 +7,7 @@ import java.util.Map;
 
 public record PerceptionSnapshot(
         SelfState self,
+        TaskInfo task,
         List<NearbyBlock> blocks,
         List<NearbyEntity> entities,
         List<NearbyItem> items,
@@ -38,6 +39,9 @@ public record PerceptionSnapshot(
     }
 
     public record NearbyItem(String type, double x, double y, double z) {
+    }
+
+    public record TaskInfo(String name, String state, double progress, int elapsedTicks, String description, String failureReason) {
     }
 
     public record TimeInfo(long worldTime, boolean isDay, int light) {

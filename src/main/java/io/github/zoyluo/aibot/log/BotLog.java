@@ -46,6 +46,14 @@ public final class BotLog {
         submit(LogCategory.DANGER, Level.INFO, bot, event, null, null, kv);
     }
 
+    public static void profile(AIPlayerEntity bot, String event, Object... kv) {
+        submit(LogCategory.PROFILE, Level.INFO, bot, event, null, null, kv);
+    }
+
+    public static void replay(AIPlayerEntity bot, String event, Object... kv) {
+        submit(LogCategory.REPLAY, Level.INFO, bot, event, null, null, kv);
+    }
+
     public static void config(String event, Object... kv) {
         submit(LogCategory.CONFIG, Level.INFO, "-", event, null, null, kv);
     }

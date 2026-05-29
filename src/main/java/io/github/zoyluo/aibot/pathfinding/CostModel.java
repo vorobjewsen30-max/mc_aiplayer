@@ -3,6 +3,8 @@ package io.github.zoyluo.aibot.pathfinding;
 import net.minecraft.util.math.BlockPos;
 
 public final class CostModel {
+    private static final int MAX_SAFE_FALL = 3;
+
     private CostModel() {
     }
 
@@ -10,7 +12,12 @@ public final class CostModel {
         return switch (type) {
             case WALK -> 1.0D;
             case JUMP_UP -> 1.5D;
-            case DROP_DOWN -> 0.5D + 0.3D * fallHeight;
+            case DROP_DOWN -> {
+                if (fallHeight > MAX_SAFE_FALL) {
+                    yield 1000.0D;
+                }
+                yield 0.5D + 0.3D * fallHeight;
+            }
             case DIG_THROUGH -> 8.0D;
         };
     }

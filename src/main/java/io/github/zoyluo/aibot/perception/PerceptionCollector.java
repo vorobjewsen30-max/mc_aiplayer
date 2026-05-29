@@ -5,6 +5,8 @@ import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.LogFields;
+import io.github.zoyluo.aibot.task.TaskManager;
+import io.github.zoyluo.aibot.task.TaskStatus;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
@@ -41,6 +43,14 @@ public final class PerceptionCollector {
         List<PerceptionSnapshot.NearbyBlock> blocks = collectBlocks(world, center, Math.min(config.radius(), 4), config.maxBlocks());
         List<PerceptionSnapshot.NearbyEntity> entities = collectEntities(bot, world, config.radius(), config.maxEntities());
         List<PerceptionSnapshot.NearbyItem> items = collectItems(bot, world, config.radius(), config.maxItems());
+        TaskStatus status = TaskManager.INSTANCE.status(bot);
+        PerceptionSnapshot.TaskInfo task = new PerceptionSnapshot.TaskInfo(
+                status.name(),
+                status.state().name(),
+                round(status.progress()),
+                status.elapsedTicks(),
+                status.description(),
+                status.failureReason());
         long elapsed = System.currentTimeMillis() - started;
         BotLog.perception(bot, "snapshot",
                 "hp", bot.getHealth(),
@@ -56,6 +66,7 @@ public final class PerceptionCollector {
         }
         return new PerceptionSnapshot(
                 self,
+                task,
                 blocks,
                 entities,
                 items,

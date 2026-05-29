@@ -5,7 +5,10 @@ import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.LogFields;
+import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.network.FakeClientConnection;
+import io.github.zoyluo.aibot.persist.BotPersistence;
+import io.github.zoyluo.aibot.persist.BotRecord;
 import io.github.zoyluo.aibot.task.TaskManager;
 import io.github.zoyluo.aibot.util.OfflineProfileFactory;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
@@ -17,8 +20,12 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ConnectedClientData;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
+import net.minecraft.world.World;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -33,6 +40,7 @@ public final class AIPlayerManager {
 
     private final Map<UUID, AIPlayerEntity> players = new ConcurrentHashMap<>();
     private final Map<String, UUID> nameIndex = new ConcurrentHashMap<>();
+    private final Map<UUID, String> roles = new ConcurrentHashMap<>();
 
     private AIPlayerManager() {
     }
@@ -67,8 +75,40 @@ public final class AIPlayerManager {
 
         players.put(player.getUuid(), player);
         nameIndex.put(normalizedName, player.getUuid());
+        roles.put(player.getUuid(), "worker");
         BotLog.lifecycle(player, "bot_spawned", "pos", LogFields.pos(player.getBlockPos()), "mode", gameMode.getName());
         return Optional.of(player);
+    }
+
+    public Optional<AIPlayerEntity> respawnFromRecord(MinecraftServer server, BotRecord record) {
+        RegistryKey<World> worldKey = RegistryKey.of(RegistryKeys.WORLD, Identifier.of(record.dimension()));
+        ServerWorld world = server.getWorld(worldKey);
+        if (world == null) {
+            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, null, "bot_restore_world_missing",
+                    "name", record.name(), "dimension", record.dimension());
+            return Optional.empty();
+        }
+        GameMode gameMode = GameMode.byName(record.gameMode(), GameMode.SURVIVAL);
+        Optional<AIPlayerEntity> spawned = spawn(
+                server,
+                record.name(),
+                world,
+                new Vec3d(record.x(), record.y(), record.z()),
+                record.yaw(),
+                record.pitch(),
+                gameMode);
+        spawned.ifPresent(bot -> {
+            BotPersistence.applyInventory(bot, record.inventoryNbt());
+            setRole(bot, record.role());
+            BotMemoryStore.INSTANCE.loadString(bot.getUuid(), record.memoryNbt());
+            bot.setHealth(Math.max(1.0F, Math.min(record.health(), bot.getMaxHealth())));
+            bot.getHungerManager().setFoodLevel(Math.max(0, Math.min(20, record.hunger())));
+            BotLog.lifecycle(bot, "bot_restored",
+                    "pos", LogFields.pos(bot.getBlockPos()),
+                    "mode", gameMode.getName(),
+                    "dimension", record.dimension());
+        });
+        return spawned;
     }
 
     public boolean despawn(MinecraftServer server, String name) {
@@ -81,8 +121,10 @@ public final class AIPlayerManager {
         entity.getActionPack().stopAll();
         BrainCoordinator.INSTANCE.reset(entity);
         TaskManager.INSTANCE.onBotDespawn(entity);
+        io.github.zoyluo.aibot.coordination.IdleCoordinator.INSTANCE.onBotRemoved(entity);
         players.remove(entity.getUuid());
         nameIndex.remove(normalizeName(name));
+        roles.remove(entity.getUuid());
         if (entity.networkHandler != null) {
             entity.networkHandler.onDisconnected(new DisconnectionInfo(Text.literal("AIBot despawn")));
         } else {
@@ -105,6 +147,23 @@ public final class AIPlayerManager {
         return Collections.unmodifiableCollection(players.values());
     }
 
+    public void setRole(AIPlayerEntity bot, String role) {
+        roles.put(bot.getUuid(), normalizeRole(role));
+        BotLog.lifecycle(bot, "bot_role_set", "role", role(bot));
+    }
+
+    public String role(AIPlayerEntity bot) {
+        return roles.getOrDefault(bot.getUuid(), "worker");
+    }
+
+    public java.util.Set<String> roles(AIPlayerEntity bot) {
+        String role = role(bot);
+        java.util.Set<String> result = new java.util.LinkedHashSet<>();
+        result.add("worker");
+        result.add(role);
+        return java.util.Set.copyOf(result);
+    }
+
     public void onServerStopping(MinecraftServer server) {
         int count = players.size();
         for (AIPlayerEntity player : players.values().toArray(AIPlayerEntity[]::new)) {
@@ -117,5 +176,12 @@ public final class AIPlayerManager {
 
     private static String normalizeName(String name) {
         return name.toLowerCase(Locale.ROOT);
+    }
+
+    private static String normalizeRole(String role) {
+        if (role == null || role.isBlank()) {
+            return "worker";
+        }
+        return role.trim().toLowerCase(Locale.ROOT);
     }
 }

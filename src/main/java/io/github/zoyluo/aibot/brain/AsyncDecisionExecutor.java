@@ -1,6 +1,7 @@
 package io.github.zoyluo.aibot.brain;
 
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.observe.BotProfiler;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -21,11 +22,16 @@ public final class AsyncDecisionExecutor {
                        BiConsumer<AIPlayerEntity, ChatResponse> onResponse,
                        BiConsumer<AIPlayerEntity, Throwable> onError) {
         executor.submit(() -> {
+            long started = System.nanoTime();
             try {
                 ChatResponse response = apiClient.chat(historySnapshot, tools);
+                long elapsed = System.nanoTime() - started;
                 bot.getServer().execute(() -> onResponse.accept(bot, response));
-            } catch (Throwable throwable) {
-                bot.getServer().execute(() -> onError.accept(bot, throwable));
+                BotProfiler.INSTANCE.record(bot.getUuid(), bot.getGameProfile().getName(), "brain_latency", elapsed);
+            } catch (Exception exception) {
+                long elapsed = System.nanoTime() - started;
+                BotProfiler.INSTANCE.record(bot.getUuid(), bot.getGameProfile().getName(), "brain_latency_error", elapsed);
+                bot.getServer().execute(() -> onError.accept(bot, exception));
             }
         });
     }

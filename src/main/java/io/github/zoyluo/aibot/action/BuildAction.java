@@ -21,6 +21,7 @@ public final class BuildAction {
             BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.ERROR, player, "place_failed", "reason", "empty_hand");
             return ActionResult.failed("empty_hand");
         }
+        var item = stack.getItem();
 
         LookAction.lookAtBlock(player, against, face);
         Vec3d hitPos = Vec3d.ofCenter(against).add(
@@ -37,7 +38,7 @@ public final class BuildAction {
         if (result.isAccepted()) {
             player.swingHand(hand);
             player.updateLastActionTime();
-            BotLog.action(player, "place", "pos", LogFields.pos(against.offset(face)), "face", face, "item", stack.getItem());
+            BotLog.action(player, "place", "pos", LogFields.pos(against.offset(face)), "face", face, "item", item);
             return ActionResult.SUCCESS;
         }
         BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.ERROR, player, "place_failed", "pos", LogFields.pos(against.offset(face)), "reason", result.getClass().getSimpleName());
@@ -77,6 +78,7 @@ public final class BuildAction {
         if (!(stack.getItem() instanceof BlockItem blockItem)) {
             return ActionResult.failed("not_block_item");
         }
+        var item = stack.getItem();
         if (!player.getServerWorld().getBlockState(pos).isAir()) {
             return ActionResult.failed("target_not_air");
         }
@@ -86,7 +88,7 @@ public final class BuildAction {
         }
         player.swingHand(hand);
         player.updateLastActionTime();
-        BotLog.action(player, "place_fallback", "pos", LogFields.pos(pos), "item", stack.getItem());
+        BotLog.action(player, "place_fallback", "pos", LogFields.pos(pos), "item", item);
         return ActionResult.SUCCESS;
     }
 }

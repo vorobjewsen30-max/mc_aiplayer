@@ -8,9 +8,16 @@ public record BlueprintSchema(
         int width,
         int height,
         int depth,
-        List<BlockPlacement> placements
+        List<BlockPlacement> placements,
+        List<Op> ops
 ) {
-    public record BlockPlacement(int dx, int dy, int dz, String blockId) {
+    public record BlockPlacement(int dx, int dy, int dz, String blockId, String palette) {
+        public BlockPlacement(int dx, int dy, int dz, String blockId) {
+            this(dx, dy, dz, blockId, null);
+        }
+    }
+
+    public record Op(String type, int[] from, int[] to, String block, String palette) {
     }
 
     public static BlueprintSchema hut5x5() {
@@ -37,6 +44,17 @@ public record BlueprintSchema(
             }
         }
         blocks.removeIf(block -> block.dx() == 2 && block.dz() == 0 && (block.dy() == 1 || block.dy() == 2));
-        return new BlueprintSchema("hut_5x5", 5, 5, 5, List.copyOf(blocks));
+        return new BlueprintSchema("hut_5x5", 5, 5, 5, List.copyOf(blocks), List.of());
+    }
+
+    public static BlueprintSchema smallHutOps() {
+        return new BlueprintSchema("small_hut", 5, 5, 5, List.of(
+                new BlockPlacement(2, 1, 0, "minecraft:air"),
+                new BlockPlacement(2, 2, 0, "minecraft:air")
+        ), List.of(
+                new Op("layer", new int[]{0, 0, 0}, new int[]{4, 0, 4}, null, "planks"),
+                new Op("hollow_box", new int[]{0, 1, 0}, new int[]{4, 3, 4}, null, "planks"),
+                new Op("layer", new int[]{0, 4, 0}, new int[]{4, 4, 4}, null, "planks")
+        ));
     }
 }

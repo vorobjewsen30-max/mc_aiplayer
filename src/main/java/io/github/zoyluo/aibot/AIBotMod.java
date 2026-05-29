@@ -3,9 +3,14 @@ package io.github.zoyluo.aibot;
 import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.brain.ChatCaptureListener;
 import io.github.zoyluo.aibot.command.AIBotCommand;
+import io.github.zoyluo.aibot.coordination.IdleCoordinator;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.BotLogWriter;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.aibot.network.AIBotServerNetworking;
+import io.github.zoyluo.aibot.network.payload.AIPayloads;
+import io.github.zoyluo.aibot.observe.TpsGuard;
+import io.github.zoyluo.aibot.persist.BotPersistence;
 import io.github.zoyluo.aibot.task.DangerWatcher;
 import io.github.zoyluo.aibot.task.TaskManager;
 import net.fabricmc.api.ModInitializer;
@@ -37,18 +42,35 @@ public class AIBotMod implements ModInitializer {
 
         BrainCoordinator.INSTANCE.configure(config);
         ChatCaptureListener.register();
+        AIPayloads.register();
+        AIBotServerNetworking.INSTANCE.register();
 
-        ServerLifecycleEvents.SERVER_STARTED.register(server ->
-                BotLog.lifecycle("server_started", "motd", server.getServerMotd()));
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            BotLog.lifecycle("server_started", "motd", server.getServerMotd());
+            int restored = BotPersistence.INSTANCE.loadAndRespawn(server);
+            if (restored > 0) {
+                BotLog.lifecycle("bot_persist_restored", "count", restored);
+            }
+        });
         ServerLifecycleEvents.SERVER_STOPPING.register(server ->
                 BotLog.lifecycle("server_stopping"));
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> AIBotServerNetworking.INSTANCE.clear());
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> BotPersistence.INSTANCE.saveAll(server));
         ServerLifecycleEvents.SERVER_STOPPING.register(AIPlayerManager.INSTANCE::onServerStopping);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> BrainCoordinator.INSTANCE.shutdown());
         ServerLifecycleEvents.SERVER_STOPPING.register(TaskManager.INSTANCE::onServerStopping);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> BotLogWriter.INSTANCE.shutdown(3000));
         ServerTickEvents.END_SERVER_TICK.register(server -> {
+            TpsGuard.INSTANCE.tick(server);
             TaskManager.INSTANCE.tickAll(server);
-            DangerWatcher.INSTANCE.scanAll(server);
+            if (server.getTicks() % TpsGuard.INSTANCE.scanInterval() == 0) {
+                IdleCoordinator.INSTANCE.tick(server);
+                DangerWatcher.INSTANCE.scanAll(server);
+            }
+            AIBotServerNetworking.INSTANCE.tick(server);
+            if (server.getTicks() > 0 && server.getTicks() % 6000 == 0) {
+                BotPersistence.INSTANCE.saveAllAsync(server);
+            }
         });
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 AIBotCommand.register(dispatcher, registryAccess));

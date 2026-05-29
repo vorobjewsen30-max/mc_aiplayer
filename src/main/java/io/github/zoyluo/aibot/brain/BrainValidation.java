@@ -26,8 +26,8 @@ public final class BrainValidation {
             return unexpected(bot, "api_failure", "request unexpectedly succeeded");
         } catch (DeepSeekApiException exception) {
             return expected(bot, "api_failure", exception.getMessage());
-        } catch (Throwable throwable) {
-            return unexpected(bot, "api_failure", throwable.getClass().getSimpleName() + ": " + throwable.getMessage());
+        } catch (Exception exception) {
+            return unexpected(bot, "api_failure", exception.getClass().getSimpleName() + ": " + exception.getMessage());
         }
     }
 
@@ -51,8 +51,8 @@ public final class BrainValidation {
             return unexpected(bot, "bad_response", "parse unexpectedly succeeded");
         } catch (DeepSeekApiException exception) {
             return expected(bot, "bad_response", exception.getMessage());
-        } catch (Throwable throwable) {
-            return unexpected(bot, "bad_response", throwable.getClass().getSimpleName() + ": " + throwable.getMessage());
+        } catch (Exception exception) {
+            return unexpected(bot, "bad_response", exception.getClass().getSimpleName() + ": " + exception.getMessage());
         }
     }
 
