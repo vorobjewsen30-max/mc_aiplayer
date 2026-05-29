@@ -33,40 +33,46 @@ public final class DangerWatcher {
 
     public void scanAll(MinecraftServer server) {
         for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.all()) {
-            Optional<Threat> threat = collectTopThreat(bot);
-            Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
-            if (threat.isPresent()) {
-                Threat top = threat.get();
-                if (top.severity().ordinal() >= Threat.Severity.MEDIUM.ordinal()
-                        && shouldAssignThreatTask(active, top)
-                        && canAssignThreatTask(server, bot, top)) {
-                    Task task = decideCombatOrEvade(bot, top);
-                    if (active.isPresent() && shouldPauseForThreat(active.get(), top, task)) {
-                        TaskManager.INSTANCE.pauseFor(bot, "threat: " + top.type());
-                    }
-                    TaskManager.INSTANCE.assign(bot, task);
-                    nextThreatAttemptTick.put(bot.getUuid(), server.getTicks() + threatCooldownTicks(top, task));
-                    BotLog.danger(bot, "threat_detected",
-                            "type", top.type(),
-                            "severity", top.severity(),
-                            "source", top.pos(),
-                            "decision", task.name());
-                    continue;
+            scanBot(server, bot);
+        }
+    }
+
+    public boolean scanBot(MinecraftServer server, AIPlayerEntity bot) {
+        Optional<Threat> threat = collectTopThreat(bot);
+        Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
+        if (threat.isPresent()) {
+            Threat top = threat.get();
+            if (top.severity().ordinal() >= Threat.Severity.MEDIUM.ordinal()
+                    && shouldAssignThreatTask(active, top)
+                    && canAssignThreatTask(server, bot, top)) {
+                Task task = decideCombatOrEvade(bot, top);
+                if (active.isPresent() && shouldPauseForThreat(active.get(), top, task)) {
+                    TaskManager.INSTANCE.pauseFor(bot, "threat: " + top.type());
                 }
-            }
-            if (maybeEat(server, bot, active)) {
-                continue;
-            }
-            if (maybeStartNightTask(server, bot, active)) {
-                continue;
-            }
-            if (active.isEmpty() && BrainCoordinator.INSTANCE.maybeWakeForFailureOrGoal(bot)) {
-                continue;
-            }
-            if (active.isEmpty() && TaskManager.INSTANCE.hasPaused(bot)) {
-                TaskManager.INSTANCE.resumeFromPause(bot);
+                TaskManager.INSTANCE.assign(bot, task);
+                nextThreatAttemptTick.put(bot.getUuid(), server.getTicks() + threatCooldownTicks(top, task));
+                BotLog.danger(bot, "threat_detected",
+                        "type", top.type(),
+                        "severity", top.severity(),
+                        "source", top.pos(),
+                        "decision", task.name());
+                return true;
             }
         }
+        if (maybeEat(server, bot, active)) {
+            return true;
+        }
+        if (maybeStartNightTask(server, bot, active)) {
+            return true;
+        }
+        if (active.isEmpty() && BrainCoordinator.INSTANCE.maybeWakeForFailureOrGoal(bot)) {
+            return true;
+        }
+        if (active.isEmpty() && TaskManager.INSTANCE.hasPaused(bot)) {
+            TaskManager.INSTANCE.resumeFromPause(bot);
+            return true;
+        }
+        return false;
     }
 
     private boolean maybeEat(MinecraftServer server, AIPlayerEntity bot, Optional<Task> active) {

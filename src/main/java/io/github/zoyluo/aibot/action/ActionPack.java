@@ -11,6 +11,9 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 public final class ActionPack {
+    private static final int PATHFIND_SUCCESS_COOLDOWN_TICKS = 5;
+    private static final int PATHFIND_FAILURE_COOLDOWN_TICKS = 20;
+
     private final AIPlayerEntity player;
 
     private float forward;
@@ -25,6 +28,8 @@ public final class ActionPack {
     private PathExecutor pathExecutor;
     private int itemUseCooldown;
     private int blockHitDelay;
+    private BlockPos lastPathGoal;
+    private int nextPathfindTick;
 
     public ActionPack(AIPlayerEntity player) {
         this.player = player;
@@ -74,11 +79,20 @@ public final class ActionPack {
     }
 
     public ActionResult startPathTo(BlockPos goal) {
+        int now = player.getServer().getTicks();
+        BlockPos immutableGoal = goal.toImmutable();
+        if (lastPathGoal != null && lastPathGoal.equals(immutableGoal) && now < nextPathfindTick) {
+            return ActionResult.failed("pathfinding_throttled");
+        }
         AStarPathfinder finder = new AStarPathfinder(player.getServerWorld(), player.getBlockPos(), goal);
         PathfindingResult result = finder.findPath();
         if (!result.success()) {
+            lastPathGoal = immutableGoal;
+            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
             return ActionResult.failed("pathfinding_failed: " + result.reason());
         }
+        lastPathGoal = immutableGoal;
+        nextPathfindTick = now + PATHFIND_SUCCESS_COOLDOWN_TICKS;
         this.pathExecutor = new PathExecutor(result.path(), goal);
         this.walkTo = null;
         this.mining = null;

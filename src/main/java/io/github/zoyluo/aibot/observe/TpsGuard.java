@@ -11,6 +11,7 @@ public final class TpsGuard {
     private static final int DEGRADED_CONTINUATION_SECONDS = 8;
     private static final int NORMAL_SCAN_INTERVAL = 1;
     private static final int DEGRADED_SCAN_INTERVAL = 20;
+    private static final int DEGRADED_DANGER_SCAN_INTERVAL = 5;
     private static final int NON_CRITICAL_TASK_INTERVAL = 5;
 
     private long lastSampleNanos;
@@ -54,6 +55,10 @@ public final class TpsGuard {
 
     public synchronized int scanInterval() {
         return lastDegraded ? DEGRADED_SCAN_INTERVAL : NORMAL_SCAN_INTERVAL;
+    }
+
+    public synchronized int dangerScanInterval() {
+        return lastDegraded ? DEGRADED_DANGER_SCAN_INTERVAL : NORMAL_SCAN_INTERVAL;
     }
 
     public synchronized boolean shouldTickNonCriticalTask(MinecraftServer server) {

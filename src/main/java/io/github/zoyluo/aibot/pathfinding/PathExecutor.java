@@ -16,6 +16,7 @@ import java.util.List;
 
 public final class PathExecutor {
     private static final int STUCK_TICKS_LIMIT = 60;
+    private static final int REPLAN_COOLDOWN_TICKS = 40;
 
     private List<Node> path;
     private int index = 1;
@@ -27,6 +28,7 @@ public final class PathExecutor {
     private Vec3d lastPos;
     private int stuckTicks;
     private int totalTicks;
+    private int lastReplanTick = -REPLAN_COOLDOWN_TICKS;
 
     public PathExecutor(List<Node> path, BlockPos originalGoal) {
         this.path = List.copyOf(path);
@@ -142,6 +144,12 @@ public final class PathExecutor {
 
     private ActionResult handleStuck(ActionPack pack, String reason) {
         if (!replanTried) {
+            int now = pack.player().getServer().getTicks();
+            if (now - lastReplanTick < REPLAN_COOLDOWN_TICKS) {
+                cleanup(pack);
+                return ActionResult.failed(reason + "; replan_throttled");
+            }
+            lastReplanTick = now;
             replanTried = true;
             BotLog.path(pack.player(), "path_stuck", "at_node", reason, "stuck_ticks", stuckTicks);
             AStarPathfinder finder = new AStarPathfinder(pack.player().getServerWorld(), pack.player().getBlockPos(), originalGoal);

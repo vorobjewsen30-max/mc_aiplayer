@@ -4,7 +4,6 @@ import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.brain.ChatCaptureListener;
 import io.github.zoyluo.aibot.command.AIBotCommand;
 import io.github.zoyluo.aibot.command.AIBotVerifySubcommand;
-import io.github.zoyluo.aibot.coordination.IdleCoordinator;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.BotLogWriter;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
@@ -12,8 +11,7 @@ import io.github.zoyluo.aibot.network.AIBotServerNetworking;
 import io.github.zoyluo.aibot.network.payload.AIPayloads;
 import io.github.zoyluo.aibot.observe.TpsGuard;
 import io.github.zoyluo.aibot.persist.BotPersistence;
-import io.github.zoyluo.aibot.task.DangerWatcher;
-import io.github.zoyluo.aibot.task.StuckWatcher;
+import io.github.zoyluo.aibot.task.BotTickCoordinator;
 import io.github.zoyluo.aibot.task.TaskManager;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -65,11 +63,7 @@ public class AIBotMod implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             TpsGuard.INSTANCE.tick(server);
             TaskManager.INSTANCE.tickAll(server);
-            StuckWatcher.INSTANCE.tick(server);
-            if (server.getTicks() % TpsGuard.INSTANCE.scanInterval() == 0) {
-                IdleCoordinator.INSTANCE.tick(server);
-                DangerWatcher.INSTANCE.scanAll(server);
-            }
+            BotTickCoordinator.INSTANCE.tick(server);
             AIBotVerifySubcommand.tick(server);
             AIBotServerNetworking.INSTANCE.tick(server);
             if (server.getTicks() > 0 && server.getTicks() % 6000 == 0) {

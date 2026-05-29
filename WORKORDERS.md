@@ -103,7 +103,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 **改动**:组 prompt 注入"当前目标 + 下一步"(`BotMemory.inject`);任务 `COMPLETED` 且有活跃 goal → 注入"上一步完成,剩余 X,请推进";**idle-watcher 与 RL-1 合并**:idle + 会话 idle + (失败未消费 || 有未完成 goal) → 唤起一轮。goal 持久化复用 M8/M16。
 **验收**:`set_goal "建基地" [挖石,盖墙,放箱]` → 自动逐步推进;重启后 `goal_status` 仍在第 N 步并续做。
 
-## WO-RL-9 · 性能实测调优  (PLAN §RL-9)
+## WO-RL-9 · 性能实测调优  (PLAN §RL-9) ✅ done: 单遍历 tick 协调器、A* 缓存/节流、degraded 分级扫描已实现, compileJava/compileClientJava 通过。
 **文件**:新 `task/BotTickCoordinator`(合并 DangerWatcher/StuckWatcher/IdleCoordinator/唤起为**单 all-bots 遍历**)、`pathfinding`、`observe/TpsGuard`
 **改动**:单遍历分发 危险/卡死/空闲/目标 四类检查(读 `TpsGuard.scanInterval()`);A* 失败短路 + 结果缓存/节流;`TpsGuard` degraded **分级降级**(先降感知/续转/非关键任务,危险响应最后降),阈值实测调参。
 **验收**:10 bot 同时干活 TPS≥19;`/aibot profile` 无单段失控;制造卡顿能 degraded 并恢复。

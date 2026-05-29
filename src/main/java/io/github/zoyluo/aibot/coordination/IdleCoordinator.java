@@ -39,19 +39,24 @@ public final class IdleCoordinator {
 
     public void tick(MinecraftServer server) {
         for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.all()) {
-            if (TaskManager.INSTANCE.getActive(bot).isPresent()) {
-                continue;
-            }
-            UUID currentJob = claimedJobs.remove(bot.getUuid());
-            if (currentJob != null) {
-                finishClaimedJob(bot, currentJob);
-            }
-            if (BrainCoordinator.INSTANCE.status(bot).busy()) {
-                continue;
-            }
-            TaskBoard.INSTANCE.claimNext(bot, AIPlayerManager.INSTANCE.roles(bot))
-                    .ifPresent(job -> assignJob(bot, job));
+            tickBot(bot);
         }
+    }
+
+    public boolean tickBot(AIPlayerEntity bot) {
+        if (TaskManager.INSTANCE.getActive(bot).isPresent()) {
+            return false;
+        }
+        UUID currentJob = claimedJobs.remove(bot.getUuid());
+        if (currentJob != null) {
+            finishClaimedJob(bot, currentJob);
+        }
+        if (BrainCoordinator.INSTANCE.status(bot).busy()) {
+            return false;
+        }
+        Optional<Job> job = TaskBoard.INSTANCE.claimNext(bot, AIPlayerManager.INSTANCE.roles(bot));
+        job.ifPresent(next -> assignJob(bot, next));
+        return job.isPresent();
     }
 
     public void onBotRemoved(AIPlayerEntity bot) {

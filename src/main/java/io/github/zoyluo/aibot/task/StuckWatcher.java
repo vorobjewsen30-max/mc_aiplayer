@@ -23,38 +23,42 @@ public final class StuckWatcher {
     }
 
     public void tick(MinecraftServer server) {
+        for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.all()) {
+            tickBot(server, bot);
+        }
+    }
+
+    public void tickBot(MinecraftServer server, AIPlayerEntity bot) {
         int now = server.getTicks();
         int window = AIBotConfig.get().watchdog().stuckWindowTicks();
-        for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.all()) {
-            Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
-            if (active.isEmpty() || active.get().state() != TaskState.RUNNING || active.get().isWaiting()) {
-                samples.remove(bot.getUuid());
-                continue;
-            }
-
-            Task task = active.get();
-            Sample current = new Sample(bot.getBlockPos().toImmutable(), task.progress(), inventoryTotal(bot), now);
-            Sample previous = samples.get(bot.getUuid());
-            if (previous == null || previous.changed(current)) {
-                samples.put(bot.getUuid(), current);
-                continue;
-            }
-
-            if (now - previous.sinceTick() < window) {
-                continue;
-            }
-
-            String reason = "stuck:" + task.name();
-            TaskManager.INSTANCE.abort(bot);
-            TaskManager.INSTANCE.recordFailure(bot, task.name(), reason, now);
+        Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
+        if (active.isEmpty() || active.get().state() != TaskState.RUNNING || active.get().isWaiting()) {
             samples.remove(bot.getUuid());
-            BotLog.warn(LogCategory.TASK, bot, "task_stuck_aborted",
-                    "name", task.name(),
-                    "reason", reason,
-                    "window_ticks", window,
-                    "progress", task.progress(),
-                    "pos", current.pos().toShortString());
+            return;
         }
+
+        Task task = active.get();
+        Sample current = new Sample(bot.getBlockPos().toImmutable(), task.progress(), inventoryTotal(bot), now);
+        Sample previous = samples.get(bot.getUuid());
+        if (previous == null || previous.changed(current)) {
+            samples.put(bot.getUuid(), current);
+            return;
+        }
+
+        if (now - previous.sinceTick() < window) {
+            return;
+        }
+
+        String reason = "stuck:" + task.name();
+        TaskManager.INSTANCE.abort(bot);
+        TaskManager.INSTANCE.recordFailure(bot, task.name(), reason, now);
+        samples.remove(bot.getUuid());
+        BotLog.warn(LogCategory.TASK, bot, "task_stuck_aborted",
+                "name", task.name(),
+                "reason", reason,
+                "window_ticks", window,
+                "progress", task.progress(),
+                "pos", current.pos().toShortString());
     }
 
     private static int inventoryTotal(AIPlayerEntity bot) {
