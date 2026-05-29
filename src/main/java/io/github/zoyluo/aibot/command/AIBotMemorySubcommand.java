@@ -46,6 +46,10 @@ public final class AIBotMemorySubcommand {
                                         .executes(context -> markPlace(context.getSource(),
                                                 StringArgumentType.getString(context, "name"),
                                                 StringArgumentType.getString(context, "place")))))
+                        .then(literal("set_base")
+                                .executes(context -> markPlace(context.getSource(),
+                                        StringArgumentType.getString(context, "name"),
+                                        "base")))
                         .then(literal("goto_place")
                                 .then(argument("place", StringArgumentType.word())
                                         .executes(context -> gotoPlace(context.getSource(),

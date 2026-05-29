@@ -31,6 +31,7 @@ public final class GatherQuotaTask extends AbstractTask {
     private int countSoFar;
     private int countBeforeHarvest;
     private int pickupTicks;
+    private StockpileTask stockpileTask;
 
     public GatherQuotaTask(Item targetItem, int targetCount) {
         this.targetItem = targetItem;
@@ -57,6 +58,7 @@ public final class GatherQuotaTask extends AbstractTask {
     protected void onStart(AIPlayerEntity bot) {
         countSoFar = InventoryAction.countItem(bot, targetItem);
         phase = countSoFar >= targetCount ? Phase.DONE : Phase.SURVEY;
+        stockpileTask = null;
     }
 
     @Override
@@ -147,8 +149,22 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private void deposit(AIPlayerEntity bot) {
-        bot.getActionPack().stopAll();
-        fail("inventory_full");
+        if (stockpileTask == null) {
+            bot.getActionPack().stopAll();
+            stockpileTask = new StockpileTask(true);
+            stockpileTask.start(bot);
+        }
+        stockpileTask.tick(bot);
+        if (stockpileTask.state() == TaskState.COMPLETED) {
+            stockpileTask = null;
+            phase = Phase.SURVEY;
+            return;
+        }
+        if (stockpileTask.state() == TaskState.FAILED) {
+            String reason = stockpileTask.failureReason();
+            stockpileTask = null;
+            fail(reason == null || reason.isBlank() ? "inventory_full" : reason);
+        }
     }
 
     private void startHarvest(AIPlayerEntity bot) {

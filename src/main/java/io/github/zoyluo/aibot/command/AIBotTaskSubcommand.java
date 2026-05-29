@@ -24,6 +24,7 @@ import io.github.zoyluo.aibot.task.MineTask;
 import io.github.zoyluo.aibot.task.MoveTask;
 import io.github.zoyluo.aibot.task.SleepTask;
 import io.github.zoyluo.aibot.task.SmeltTask;
+import io.github.zoyluo.aibot.task.StockpileTask;
 import io.github.zoyluo.aibot.task.StripMineTask;
 import io.github.zoyluo.aibot.task.Task;
 import io.github.zoyluo.aibot.task.TaskManager;
@@ -159,6 +160,10 @@ public final class AIBotTaskSubcommand {
                                                                                         .executes(context -> assignDeposit(context, requiredItem(context, "item"), 0, false, getBlockPos(context)))
                                                                                         .then(argument("count", IntegerArgumentType.integer(1))
                                                                                                 .executes(context -> assignDeposit(context, requiredItem(context, "item"), IntegerArgumentType.getInteger(context, "count"), false, getBlockPos(context)))))))))))
+                                .then(literal("stockpile")
+                                        .executes(context -> assignStockpile(context, true))
+                                        .then(literal("include_tools")
+                                                .executes(context -> assignStockpile(context, false))))
                                 .then(literal("withdraw")
                                         .then(argument("item", IdentifierArgumentType.identifier())
                                                 .executes(context -> assignWithdraw(context, null, 1))
@@ -298,6 +303,10 @@ public final class AIBotTaskSubcommand {
 
     private static int assignWithdraw(CommandContext<ServerCommandSource> context, BlockPos pos, int count) {
         return assign(context, bot -> ContainerTask.withdraw(pos, requiredItem(context, "item"), count));
+    }
+
+    private static int assignStockpile(CommandContext<ServerCommandSource> context, boolean allExceptTools) {
+        return assign(context, bot -> new StockpileTask(allExceptTools));
     }
 
     private static int assignBuild(CommandContext<ServerCommandSource> context, boolean autoSite, boolean flatten) {
