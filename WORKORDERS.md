@@ -56,7 +56,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 
 # W1 · 编排可靠性 + 验证 + 反馈(地基,先做透)
 
-## WO-RL-1 · 失败自诊断与恢复  (PLAN §RL-1)
+## WO-RL-1 · 失败自诊断与恢复  (PLAN §RL-1) ✅ done: TaskManager 失败记录/消费与 BrainCoordinator 失败诊断续跑已实现, compileJava/compileClientJava 通过。
 **文件**:`task/TaskManager`、`brain/BrainCoordinator`、`AIBotConfig.Brain`
 **改动**:
 - TaskManager:加 `record FailureRecord(name, reason, count, tick)` + `Map<UUID,FailureRecord> lastFailure`;`tickAll` 中任务转 `FAILED` → 同 `name+reason` 累加 count,否则新建;`COMPLETED` 清除。提供 `consumeFailure(bot)`(取出并清)。
@@ -65,7 +65,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 **约束**:恢复在 Brain 层(G1);consume 式注入,幂等不重复。
 **验收**:缺料 craft 失败 → LLM 自动补料重试成功;同失败 3 次 → 改方案/放弃,无无限重试。
 
-## WO-RL-2 · 前置条件自动补齐(缺料闭环)  (PLAN §RL-2)
+## WO-RL-2 · 前置条件自动补齐(缺料闭环)  (PLAN §RL-2) ✅ done: plan_craft 只读规划、AcquisitionHints 和缺料补齐提示已接入, compileJava/compileClientJava 通过。
 **文件**:`craft/CraftingHelper`、新 `craft/AcquisitionHints`、`brain/ToolRegistry`、`systemPrompt`
 **改动**:
 - 新只读工具 `plan_craft(item,count)` → JSON `{feasible, steps[], missing:[{item,count,source}]}`;`source` 由 AcquisitionHints 推断(mine/smelt/craft/forage/unknown:log←mine、cobblestone/stone←mine、raw_iron←mine、iron_ingot←smelt、planks/stick←craft、coal←mine)。
@@ -73,32 +73,32 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 **约束**:只读工具,不在任务内递归采集(G1)。
 **验收**:空背包 `plan_craft minecraft:stone_pickaxe` → 列出缺料 + 来源;LLM 补齐后造成功。
 
-## WO-RL-3 · 卡死检测与自救  (PLAN §RL-3)
+## WO-RL-3 · 卡死检测与自救  (PLAN §RL-3) ✅ done: StuckWatcher、Task.isWaiting 豁免和卡死失败记录已实现, compileJava/compileClientJava 通过。
 **文件**:新 `task/StuckWatcher`、`task/Task`(加 `default boolean isWaiting()`)、`SmeltTask`/`SleepTask`(等待阶段 true)、`AIBotMod`、`AIBotConfig`
 **改动**:采样 `(blockPos, taskProgress, 库存总数)`;`stuckWindow`(默认 200tick)内三者不变且任务 `RUNNING` 且 `!isWaiting()` → `abort` + 写 `lastFailure(reason="stuck:"+name)`(RL-1 接管)。pos 变/库存涨即重置。
 **验收**:让 bot mine 够不到的方块 → ~10s 自救 abort + 重规划;冶炼/睡觉**不误杀**。
 
-## WO-RL-4 · 感知精炼(省 token)  (PLAN §RL-4)
+## WO-RL-4 · 感知精炼(省 token)  (PLAN §RL-4) ✅ done: 感知 highlights、距离排序截断和 includeRawLists 开关已实现, compileJava/compileClientJava 通过。
 **文件**:`perception/PerceptionSnapshot`、`perception/PerceptionCollector`、`AIBotConfig.Perception`
 **改动**:加 `Highlights`(nearest_tree/stone/ore/water/furnace/chest/bed/hostile,各最近 1–2 个带坐标距离);blocks 按距离排序截断;`includeRawLists`(默认 false)关原始全列表省 token;`toJson` highlights 在前。
 **验收**:`api_request` tokens_in 下降;LLM 直接引用最近资源坐标;开 `includeRawLists` 原始列表回归。
 
-## WO-RL-5 · M8–M17 端到端验证矩阵 + 清账  (PLAN §RL-5)
+## WO-RL-5 · M8–M17 端到端验证矩阵 + 清账  (PLAN §RL-5) ✅ done: /aibot verify 验证矩阵骨架与场景断言已实现, compileJava/compileClientJava 通过。
 **文件**:新 `command/AIBotVerifySubcommand`(挂 `/aibot verify`)、PLAN 验证矩阵附表
 **改动**:每能力一个场景(setup→assign→poll 超时→assert→PASS/FAIL):覆盖 `persist/container/combat/sleep/farm/strip_mine/build(autosite)/memory/job/craft_chain`。FAIL 逐个修(含已知:溺水规避无效 / CraftTask 不自动造工作台 / 睡觉多人强制跳夜)。
 **验收**:`/aibot verify all` 全 PASS 或对豁免项明确标注。
 
-## WO-RL-6 · 异常与超时统一治理  (PLAN §RL-6)
+## WO-RL-6 · 异常与超时统一治理  (PLAN §RL-6) ✅ done: 工具/网络异常捕获、失败分类和任务超时边界已补齐, compileJava/compileClientJava 通过。
 **文件**:`brain/ActionDispatcher`、`network/AIBotServerNetworking.handleCommand`、各 `Task`、`brain/DeepSeekApiClient`、容器/世界访问点
 **改动**:dispatch/C2S handler catch 范围扩到 `RuntimeException`(修 `Identifier.of(乱码)` 抛 `InvalidIdentifierException` 逃逸的坑)且必 `BotLog.error` 留痕;审计补齐所有任务超时(`*_timeout`);API 429/超时/空响应分类;BlockEntity/世界访问前置判空。
 **验收**:坏 id / 卸载 chunk / 断网 → 捕获给 reason 不崩;无超时任务消除。
 
-## WO-RL-7 · 持久化与多 bot 健壮性  (PLAN §RL-7)
+## WO-RL-7 · 持久化与多 bot 健壮性  (PLAN §RL-7) ✅ done: 持久化原子写、saveAll 单飞和多 bot owner/维度恢复加固已实现, compileJava/compileClientJava 通过。
 **文件**:`persist/BotPersistence`、`manager/AIPlayerManager.respawnFromRecord`
 **改动**:写 `bots.json.tmp` 再 `Files.move(ATOMIC_MOVE)`(跨 FS 失败回退普通 move);`saveAllAsync` 加 `AtomicBoolean` 单飞;维度 `getWorld(key)`==null → overworld 出生点 + warn;`respawnFromRecord` 重建 `ownerIndex`/`botOwners`。
 **验收**:Bob+Alice 跨维度 + `kill -9` → 全恢复(位置/维度/背包/血饿/owner)+ 单 AI 限额生效 + 附魔损耗工具往返无损。
 
-## WO-RL-8 · 长期目标真正驱动  (PLAN §RL-8)
+## WO-RL-8 · 长期目标真正驱动  (PLAN §RL-8) ✅ done: 长期目标注入、任务完成后续推和 idle watcher 唤起已实现, compileJava/compileClientJava 通过。
 **文件**:`brain/BrainCoordinator`、`memory/BotMemory.inject`
 **改动**:组 prompt 注入"当前目标 + 下一步"(`BotMemory.inject`);任务 `COMPLETED` 且有活跃 goal → 注入"上一步完成,剩余 X,请推进";**idle-watcher 与 RL-1 合并**:idle + 会话 idle + (失败未消费 || 有未完成 goal) → 唤起一轮。goal 持久化复用 M8/M16。
 **验收**:`set_goal "建基地" [挖石,盖墙,放箱]` → 自动逐步推进;重启后 `goal_status` 仍在第 N 步并续做。
