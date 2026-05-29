@@ -1,12 +1,16 @@
 package io.github.zoyluo.aibot.task;
 
 import io.github.zoyluo.aibot.action.ActionResult;
+import io.github.zoyluo.aibot.action.ContainerAction;
 import io.github.zoyluo.aibot.action.FarmAction;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
+import net.minecraft.item.Items;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -23,8 +27,15 @@ public final class FarmTask extends AbstractTask {
         PLANT,
         HARVEST,
         NEXT,
+        DEPOSIT,
+        DEPOSIT_GOTO,
+        DEPOSIT_TRANSFER,
         DONE
     }
+
+    private static final int DEPOSIT_RADIUS = 8;
+    private static final int DEPOSIT_INTERVAL_ACTIONS = 16;
+    private static final double REACH_SQUARED = 20.25D;
 
     private final BlockPos areaCenter;
     private final int radius;
@@ -33,9 +44,14 @@ public final class FarmTask extends AbstractTask {
     private final boolean keepTending;
     private final boolean harvestOnly;
     private final List<FarmTarget> targets = new ArrayList<>();
+    private final List<BlockPos> depositContainers = new ArrayList<>();
     private Phase phase = Phase.SURVEY;
     private FarmTarget current;
+    private BlockPos basePos;
+    private BlockPos depositContainerPos;
+    private int depositContainerIndex;
     private int completedActions;
+    private int lastDepositActionCount;
     private int waitTicks;
     private String note = "";
 
@@ -74,16 +90,13 @@ public final class FarmTask extends AbstractTask {
     @Override
     protected void onStart(AIPlayerEntity bot) {
         phase = Phase.SURVEY;
+        lastDepositActionCount = completedActions;
     }
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (!keepTending && elapsed > 2400) {
             fail("farm_timeout");
-            return;
-        }
-        if (keepTending && elapsed > 20 * 60 * 20) {
-            complete();
             return;
         }
         switch (phase) {
@@ -93,6 +106,9 @@ public final class FarmTask extends AbstractTask {
             case PLANT -> plant(bot);
             case HARVEST -> harvest(bot);
             case NEXT -> next(bot);
+            case DEPOSIT -> prepareDeposit(bot);
+            case DEPOSIT_GOTO -> goToDepositContainer(bot);
+            case DEPOSIT_TRANSFER -> depositTransfer(bot);
             case DONE -> done(bot);
         }
     }
@@ -109,6 +125,8 @@ public final class FarmTask extends AbstractTask {
         if (targets.isEmpty()) {
             if (!harvestOnly && InventoryAction.countItem(bot, seed) <= 0 && completedActions == 0) {
                 fail("missing " + seed + " x1");
+            } else if (keepTending && hasDepositItems(bot)) {
+                phase = Phase.DEPOSIT;
             } else {
                 phase = Phase.DONE;
             }
@@ -139,6 +157,11 @@ public final class FarmTask extends AbstractTask {
     }
 
     private void next(AIPlayerEntity bot) {
+        if (keepTending && completedActions - lastDepositActionCount >= DEPOSIT_INTERVAL_ACTIONS
+                && hasDepositItems(bot)) {
+            phase = Phase.DEPOSIT;
+            return;
+        }
         current = targets.isEmpty() ? null : targets.remove(0);
         if (current == null) {
             phase = Phase.SURVEY;
@@ -204,6 +227,100 @@ public final class FarmTask extends AbstractTask {
         phase = Phase.NEXT;
     }
 
+    private void prepareDeposit(AIPlayerEntity bot) {
+        Item item = nextDepositItem(bot);
+        if (item == null) {
+            finishDeposit();
+            return;
+        }
+        basePos = BotMemoryStore.INSTANCE.of(bot.getUuid())
+                .placeIn(bot.getServerWorld(), "base")
+                .orElse(null);
+        if (basePos == null) {
+            note = "deposit_skipped:no_base";
+            finishDeposit();
+            return;
+        }
+        depositContainers.clear();
+        BlockPos.stream(basePos.add(-DEPOSIT_RADIUS, -3, -DEPOSIT_RADIUS), basePos.add(DEPOSIT_RADIUS, 4, DEPOSIT_RADIUS))
+                .map(BlockPos::toImmutable)
+                .filter(pos -> ContainerAction.resolve(bot, pos).isPresent())
+                .forEach(depositContainers::add);
+        depositContainers.sort(Comparator
+                .comparing((BlockPos pos) -> !containsItem(bot, pos, item))
+                .thenComparingDouble(pos -> pos.getSquaredDistance(bot.getBlockPos())));
+        depositContainerIndex = 0;
+        selectDepositContainer(bot);
+    }
+
+    private void selectDepositContainer(AIPlayerEntity bot) {
+        if (nextDepositItem(bot) == null) {
+            finishDeposit();
+            return;
+        }
+        if (depositContainerIndex >= depositContainers.size()) {
+            note = "deposit_skipped:no_base_container";
+            finishDeposit();
+            return;
+        }
+        depositContainerPos = depositContainers.get(depositContainerIndex++);
+        if (bot.getEyePos().squaredDistanceTo(depositContainerPos.toCenterPos()) <= REACH_SQUARED) {
+            phase = Phase.DEPOSIT_TRANSFER;
+            return;
+        }
+        BlockPos stand = adjacentStandPos(bot, depositContainerPos.down());
+        if (stand == null) {
+            selectDepositContainer(bot);
+            return;
+        }
+        ActionResult result = bot.getActionPack().startPathTo(stand);
+        if (result.isFailed()) {
+            note = result.reason();
+            selectDepositContainer(bot);
+            return;
+        }
+        phase = Phase.DEPOSIT_GOTO;
+    }
+
+    private void goToDepositContainer(AIPlayerEntity bot) {
+        if (depositContainerPos == null || ContainerAction.resolve(bot, depositContainerPos).isEmpty()) {
+            phase = Phase.DEPOSIT;
+            return;
+        }
+        if (bot.getEyePos().squaredDistanceTo(depositContainerPos.toCenterPos()) <= REACH_SQUARED) {
+            bot.getActionPack().stopAll();
+            phase = Phase.DEPOSIT_TRANSFER;
+            return;
+        }
+        if (bot.getActionPack().isPathExecutorIdle() && elapsed > 10) {
+            selectDepositContainer(bot);
+        }
+    }
+
+    private void depositTransfer(AIPlayerEntity bot) {
+        Inventory container = ContainerAction.resolve(bot, depositContainerPos).orElse(null);
+        if (container == null) {
+            selectDepositContainer(bot);
+            return;
+        }
+        Item item = nextDepositItem(bot);
+        if (item == null) {
+            finishDeposit();
+            return;
+        }
+        ContainerAction.TransferResult result = ContainerAction.depositOne(container, bot, stack -> stack.isOf(item), maxDepositCount(bot, item));
+        if (result.movedAny()) {
+            note = "deposited " + item + " x" + result.count();
+            return;
+        }
+        selectDepositContainer(bot);
+    }
+
+    private void finishDeposit() {
+        lastDepositActionCount = completedActions;
+        phase = Phase.DONE;
+    }
+
     private void harvest(AIPlayerEntity bot) {
         ActionResult result = FarmAction.harvest(bot, current.ground().up());
         if (result.isFailed()) {
@@ -233,6 +350,65 @@ public final class FarmTask extends AbstractTask {
             return;
         }
         complete();
+    }
+
+    @Override
+    public boolean isWaiting() {
+        return keepTending && phase == Phase.DONE;
+    }
+
+    private boolean hasDepositItems(AIPlayerEntity bot) {
+        return nextDepositItem(bot) != null;
+    }
+
+    private Item nextDepositItem(AIPlayerEntity bot) {
+        Item harvest = harvestItem();
+        if (harvest != seed && InventoryAction.countItem(bot, harvest) > 0) {
+            return harvest;
+        }
+        if (InventoryAction.countItem(bot, seed) > seedReserve()) {
+            return seed;
+        }
+        return null;
+    }
+
+    private int maxDepositCount(AIPlayerEntity bot, Item item) {
+        int count = InventoryAction.countItem(bot, item);
+        if (item == seed) {
+            return Math.max(0, count - seedReserve());
+        }
+        return count;
+    }
+
+    private int seedReserve() {
+        int area = (radius * 2 + 1) * (radius * 2 + 1);
+        return Math.max(8, area);
+    }
+
+    private Item harvestItem() {
+        if (crop == Blocks.WHEAT) {
+            return Items.WHEAT;
+        }
+        if (crop == Blocks.CARROTS) {
+            return Items.CARROT;
+        }
+        if (crop == Blocks.POTATOES) {
+            return Items.POTATO;
+        }
+        return seed;
+    }
+
+    private static boolean containsItem(AIPlayerEntity bot, BlockPos pos, Item item) {
+        Inventory inventory = ContainerAction.resolve(bot, pos).orElse(null);
+        if (inventory == null) {
+            return false;
+        }
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            if (inventory.getStack(slot).isOf(item)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static BlockPos adjacentStandPos(AIPlayerEntity bot, BlockPos target) {

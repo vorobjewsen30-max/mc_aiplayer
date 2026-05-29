@@ -138,7 +138,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 **改动**:主工具 `getDamage()` 近 `getMaxDamage()`(<10%)或 无食物且饿 → `pauseFor` 原任务 + `ResupplyTask`(回 base→`withdraw` 或 `CraftingHelper.applyCraft` 现造)→ 完成后 `resumeFromPause`/RL-1 恢复。
 **验收**:铁镐快断 → 回 base 换镐续挖;饿且无食物 → 回 base 取食物吃。
 
-## WO-RL-15 · 长期农业循环  (PLAN §RL-15)
+## WO-RL-15 · 长期农业循环  (PLAN §RL-15) ✅ done: FarmTask keep_tending 长期等待不退出, 增 DEPOSIT/入 base/留种逻辑和 isWaiting 豁免, compileJava/compileClientJava 通过。
 **文件**:`task/FarmTask`(增 `DEPOSIT` 阶段 + 留种)
 **改动**:`keepTending` 强化:成熟才收、收后补种、周期性入 base、补种后余种入箱(自给);等待成熟阶段 `isWaiting()` 豁免 RL-3。
 **验收**:`farm <area> wheat keep_tending` → 长期 收-补种-入箱-留种 循环。
