@@ -11,7 +11,6 @@ import io.github.zoyluo.aibot.perception.PerceptionCollector;
 import io.github.zoyluo.aibot.perception.PerceptionSnapshot;
 import io.github.zoyluo.aibot.task.MemoryStore;
 import io.github.zoyluo.aibot.task.TaskManager;
-import net.minecraft.text.Text;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -28,6 +27,7 @@ public final class BrainCoordinator {
     private static final int MAX_CONTINUATION_TASK_POLLS = 80;
 
     private final Map<UUID, BotConversation> conversations = new ConcurrentHashMap<>();
+    private final Map<UUID, Boolean> manualModes = new ConcurrentHashMap<>();
     private ToolRegistry toolRegistry = new ToolRegistry();
     private ActionDispatcher dispatcher = new ActionDispatcher(toolRegistry);
     private AsyncDecisionExecutor executor;
@@ -49,9 +49,7 @@ public final class BrainCoordinator {
         BotConversation conversation = conversations.computeIfAbsent(bot.getUuid(), ignored -> new BotConversation());
         synchronized (conversation) {
             if (conversation.busy) {
-                String busyMessage = bot.getGameProfile().getName() + " is thinking, please wait.";
-                broadcast(bot, busyMessage);
-                AIBotServerNetworking.INSTANCE.sendBotChat(bot, "system", busyMessage);
+                sendPanelChat(bot, "system", bot.getGameProfile().getName() + " 正在思考,请稍等。");
                 return false;
             }
             conversation.busy = true;
@@ -66,6 +64,7 @@ public final class BrainCoordinator {
         trimHistory(conversation);
         conversation.turnsInCurrentRequest = 0;
         conversation.continuationTaskPolls = 0;
+        conversation.maxTurnsHintInjected = false;
         submit(bot, conversation);
         return true;
     }
@@ -83,8 +82,7 @@ public final class BrainCoordinator {
                 "finish_reason", response.finishReason());
 
         if (response.content() != null && !response.content().isBlank()) {
-            broadcast(bot, "<" + bot.getGameProfile().getName() + "> " + response.content());
-            AIBotServerNetworking.INSTANCE.sendBotChat(bot, "bot", response.content());
+            sendPanelChat(bot, "bot", response.content());
         }
         conversation.lastPromptTokens = response.promptTokens();
         conversation.lastCompletionTokens = response.completionTokens();
@@ -96,11 +94,10 @@ public final class BrainCoordinator {
             ReplayRecorder.INSTANCE.onDecision(bot, conversation.lastPerceptionDigest, response.toolCalls(), replayResult(toolResults));
             conversation.history.addAll(toolResults);
             conversation.turnsInCurrentRequest++;
+            maybeInjectMaxTurnsHint(conversation);
             if (conversation.turnsInCurrentRequest >= AIBotConfig.get().brain().maxTurnsPerRequest()) {
                 BotLog.warn(LogCategory.COMM, bot, "max_turns_reached", "turns", conversation.turnsInCurrentRequest, "last_response", response.finishReason());
-                String maxTurnsMessage = "max turns reached.";
-                broadcast(bot, "<" + bot.getGameProfile().getName() + "> " + maxTurnsMessage);
-                AIBotServerNetworking.INSTANCE.sendBotChat(bot, "system", maxTurnsMessage);
+                sendPanelChat(bot, "system", "工具调用轮次已达到上限。我会先停下来,请改用更高层任务或补充目标。");
                 conversation.busy = false;
                 trimHistory(conversation);
                 return;
@@ -123,14 +120,53 @@ public final class BrainCoordinator {
         }
         String message = throwable.getMessage() == null ? throwable.getClass().getSimpleName() : throwable.getMessage();
         BotLog.error(bot, "brain_hiccup", throwable, "message", message);
-        String errorMessage = "brain error: " + message;
-        broadcast(bot, "<" + bot.getGameProfile().getName() + "> " + errorMessage);
-        AIBotServerNetworking.INSTANCE.sendBotChat(bot, "system", errorMessage);
+        sendPanelChat(bot, "system", "大脑请求失败: " + message);
     }
 
     public void reset(AIPlayerEntity bot) {
         conversations.remove(bot.getUuid());
+        manualModes.remove(bot.getUuid());
         BotLog.comm(bot, "conversation_reset");
+    }
+
+    public void setManualMode(AIPlayerEntity bot, boolean enabled) {
+        if (enabled) {
+            manualModes.put(bot.getUuid(), true);
+        } else {
+            manualModes.remove(bot.getUuid());
+        }
+        BotLog.comm(bot, "manual_mode_set", "enabled", enabled);
+    }
+
+    public boolean manualMode(AIPlayerEntity bot) {
+        return manualModes.getOrDefault(bot.getUuid(), false);
+    }
+
+    public boolean maybeWakeForFailure(AIPlayerEntity bot) {
+        if (TaskManager.INSTANCE.peekFailure(bot).isEmpty()) {
+            return false;
+        }
+        ensureConfigured();
+        BotConversation conversation = conversations.computeIfAbsent(bot.getUuid(), ignored -> new BotConversation());
+        synchronized (conversation) {
+            if (conversation.busy) {
+                return false;
+            }
+            conversation.busy = true;
+        }
+        if (conversation.history.isEmpty()) {
+            conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().getName())));
+        }
+        conversation.turnsInCurrentRequest = 0;
+        conversation.continuationTaskPolls = 0;
+        conversation.maxTurnsHintInjected = false;
+        if (!maybeInjectFailure(bot, conversation)) {
+            conversation.busy = false;
+            return false;
+        }
+        trimHistory(conversation);
+        submit(bot, conversation);
+        return true;
     }
 
     public void shutdown() {
@@ -139,6 +175,7 @@ public final class BrainCoordinator {
             executor = null;
         }
         conversations.clear();
+        manualModes.clear();
     }
 
     public BrainStatus status(AIPlayerEntity bot) {
@@ -154,13 +191,18 @@ public final class BrainCoordinator {
                 conversation.lastCacheHitTokens);
     }
 
+    public void sendPanelChat(AIPlayerEntity bot, String role, String text) {
+        AIBotServerNetworking.INSTANCE.sendBotChat(bot, role, text);
+    }
+
     public int conversationCount() {
         return conversations.size();
     }
 
     private void submit(AIPlayerEntity bot, BotConversation conversation) {
         List<ChatMessage> historySnapshot = MemoryStore.INSTANCE.prepareHistory(bot, List.copyOf(conversation.history));
-        List<ToolDefinition> toolsSnapshot = toolRegistry.allTools();
+        AIBotConfig.Brain brainConfig = AIBotConfig.get().brain();
+        List<ToolDefinition> toolsSnapshot = toolRegistry.tools(brainConfig, brainConfig.exposesLowLevelTools() || manualMode(bot));
         executor.submit(bot, historySnapshot, toolsSnapshot, this::onResponse, this::onError);
     }
 
@@ -184,6 +226,11 @@ public final class BrainCoordinator {
                         return;
                     }
                     conversation.continuationTaskPolls = 0;
+                    if (maybeInjectFailure(bot, conversation)) {
+                        trimHistory(conversation);
+                        submit(bot, conversation);
+                        return;
+                    }
                     PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
                     conversation.lastPerceptionDigest = perceptionDigest(snapshot);
                     conversation.history.add(ChatMessage.user("Updated state after tool calls:\n" + snapshot.toJson()));
@@ -217,8 +264,42 @@ public final class BrainCoordinator {
         }
     }
 
-    private static void broadcast(AIPlayerEntity bot, String message) {
-        bot.getServer().getPlayerManager().broadcast(Text.literal(message), false);
+    private void maybeInjectMaxTurnsHint(BotConversation conversation) {
+        int maxTurns = AIBotConfig.get().brain().maxTurnsPerRequest();
+        if (conversation.maxTurnsHintInjected || conversation.turnsInCurrentRequest < maxTurns - 2) {
+            return;
+        }
+        conversation.history.add(ChatMessage.system("你已多次调用工具仍未完成。请改用一个高层任务(如 assign_task / strip_mine / craft),然后停止调用工具、等待其完成;若无法完成,用 say 说明原因。"));
+        conversation.maxTurnsHintInjected = true;
+    }
+
+    private boolean maybeInjectFailure(AIPlayerEntity bot, BotConversation conversation) {
+        return TaskManager.INSTANCE.consumeFailure(bot)
+                .map(failure -> {
+                    int maxRetries = AIBotConfig.get().brain().maxTaskRetries();
+                    String retryHint = failure.count() >= maxRetries
+                            ? " 已经连续多次同样失败,请倾向于换方法或用 say 说明无法完成。"
+                            : "";
+                    PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
+                    conversation.lastPerceptionDigest = perceptionDigest(snapshot);
+                    conversation.history.add(ChatMessage.user("上一个任务失败:"
+                            + failure.name()
+                            + ",原因:"
+                            + failure.reason()
+                            + "(第"
+                            + failure.count()
+                            + "次)。请判断:补齐前置条件后重试 / 换用其它方法 / 用 say 说明无法完成。"
+                            + retryHint
+                            + "\n\nCurrent state:\n"
+                            + snapshot.toJson()));
+                    BotLog.comm(bot, "failure_injected",
+                            "name", failure.name(),
+                            "reason", failure.reason(),
+                            "count", failure.count(),
+                            "tick", failure.tick());
+                    return true;
+                })
+                .orElse(false);
     }
 
     private static String perceptionDigest(PerceptionSnapshot snapshot) {
@@ -253,7 +334,7 @@ public final class BrainCoordinator {
                 3. Prefer high-level deterministic tasks for survival work. Use assign_task for mining/count-based gathering, and use craft, smelt, and eat for those actions.
                 4. Low-level tools such as move_to, mine_block, select_hotbar, and place_block are for one-off manual actions only. Do not use them for gathering materials or placing a crafting table for recipes unless the human explicitly asks for manual control.
                 5. High-level tasks such as craft, smelt, eat, or assign_task run over multiple ticks. Start only one such task at a time, then use get_task_status or the Current state task field on later turns until it is COMPLETED or FAILED before assigning the next task.
-                6. Use the say tool to reply to humans. Keep replies short (one sentence).
+                6. Always reply to humans in Simplified Chinese. Use the say tool to reply to humans. Keep replies short (one sentence).
                 7. For survival crafting, call craft for the intended target item, assign_task mine for missing block resources, smelt for raw ores, and retry craft after missing materials are resolved. CraftTask expands recipe-table intermediates such as planks and sticks, so do not craft planks or sticks as standalone steps unless the human asks for those items.
                 8. For 3x3 recipes, do not manually select or place a crafting table. If a crafting table is nearby or in inventory, the craft task can use or place it.
                 9. To make an iron pickaxe from scratch, use this pattern as needed: assign_task mine oak_log count 3, craft crafting_table, craft wooden_pickaxe, assign_task mine stone count 11 or cobblestone count 11, craft stone_pickaxe, assign_task mine iron_ore count 3 and coal_ore count 1 if fuel is missing, craft furnace if no furnace is available, smelt raw_iron into iron_ingot count 3, then craft iron_pickaxe.
@@ -268,6 +349,7 @@ public final class BrainCoordinator {
         private final Deque<ChatMessage> history = new ArrayDeque<>();
         private int turnsInCurrentRequest;
         private int continuationTaskPolls;
+        private boolean maxTurnsHintInjected;
         private boolean busy;
         private int lastPromptTokens;
         private int lastCompletionTokens;

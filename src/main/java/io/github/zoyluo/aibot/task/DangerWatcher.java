@@ -3,6 +3,7 @@ package io.github.zoyluo.aibot.task;
 import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.action.EquipAction;
 import io.github.zoyluo.aibot.action.InventoryAction;
+import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
@@ -57,6 +58,9 @@ public final class DangerWatcher {
                 continue;
             }
             if (maybeStartNightTask(server, bot, active)) {
+                continue;
+            }
+            if (active.isEmpty() && BrainCoordinator.INSTANCE.maybeWakeForFailure(bot)) {
                 continue;
             }
             if (active.isEmpty() && TaskManager.INSTANCE.hasPaused(bot)) {

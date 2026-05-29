@@ -19,6 +19,7 @@ public final class TaskManager {
     private final Map<UUID, Task> active = new ConcurrentHashMap<>();
     private final Map<UUID, Task> paused = new ConcurrentHashMap<>();
     private final Map<UUID, TaskStatus> lastStatus = new ConcurrentHashMap<>();
+    private final Map<UUID, FailureRecord> lastFailure = new ConcurrentHashMap<>();
 
     private TaskManager() {
     }
@@ -109,13 +110,32 @@ public final class TaskManager {
             lastStatus.put(uuid, TaskStatus.from(task));
             if (task.state() == TaskState.COMPLETED) {
                 active.remove(uuid);
+                lastFailure.remove(uuid);
                 BotLog.task(player, "task_completed", "name", task.name(), "elapsed_ticks", task.elapsedTicks());
             } else if (task.state() == TaskState.FAILED) {
                 active.remove(uuid);
+                recordFailure(player, task.name(), task.failureReason(), server.getTicks());
                 BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.TASK, player, "task_failed",
                         "name", task.name(), "reason", task.failureReason(), "elapsed_ticks", task.elapsedTicks());
             }
         }
+    }
+
+    public void recordFailure(AIPlayerEntity bot, String name, String reason, int tick) {
+        UUID uuid = bot.getUuid();
+        FailureRecord previous = lastFailure.get(uuid);
+        int count = previous != null && previous.name().equals(name) && previous.reason().equals(reason)
+                ? previous.count() + 1
+                : 1;
+        lastFailure.put(uuid, new FailureRecord(name, reason, count, tick));
+    }
+
+    public Optional<FailureRecord> peekFailure(AIPlayerEntity bot) {
+        return Optional.ofNullable(lastFailure.get(bot.getUuid()));
+    }
+
+    public Optional<FailureRecord> consumeFailure(AIPlayerEntity bot) {
+        return Optional.ofNullable(lastFailure.remove(bot.getUuid()));
     }
 
     public void onServerStopping(MinecraftServer server) {
@@ -124,6 +144,7 @@ public final class TaskManager {
         }
         active.clear();
         paused.clear();
+        lastFailure.clear();
         BotLog.task(null, "tasks_cleared");
     }
 
@@ -131,6 +152,7 @@ public final class TaskManager {
         abort(bot);
         paused.remove(bot.getUuid());
         lastStatus.remove(bot.getUuid());
+        lastFailure.remove(bot.getUuid());
     }
 
     public int activeCount() {
@@ -139,5 +161,8 @@ public final class TaskManager {
 
     private static boolean isCritical(Task task) {
         return task instanceof EvadeTask || task instanceof CombatTask || task instanceof EatTask;
+    }
+
+    public record FailureRecord(String name, String reason, int count, int tick) {
     }
 }

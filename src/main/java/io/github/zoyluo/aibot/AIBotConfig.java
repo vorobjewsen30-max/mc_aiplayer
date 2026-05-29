@@ -86,7 +86,7 @@ public record AIBotConfig(
         return new AIBotConfig(
                 new DeepSeek("", "https://api.deepseek.com", "deepseek-chat", 2048, 0.3D, 60, 3, 500),
                 new Perception(16, 20, 10, 10),
-                new Brain(36, 6, 24),
+                new Brain(36, 6, 24, false, true, false, 3),
                 new Logging(true, "logs/aibot", true, "daily", 50, 30, true, Map.of(
                         "LIFECYCLE", "INFO",
                         "COMM", "INFO",
@@ -141,12 +141,36 @@ public record AIBotConfig(
         }
     }
 
-    public record Brain(int maxHistoryMessages, int maxToolCallsPerTurn, int maxTurnsPerRequest) {
+    public record Brain(
+            int maxHistoryMessages,
+            int maxToolCallsPerTurn,
+            int maxTurnsPerRequest,
+            Boolean exposeLowLevelTools,
+            Boolean enableMemoryTools,
+            Boolean enableCoordinationTools,
+            int maxTaskRetries
+    ) {
         Brain withDefaults(Brain defaults) {
             return new Brain(
                     positiveOrDefault(maxHistoryMessages, defaults.maxHistoryMessages),
                     positiveOrDefault(maxToolCallsPerTurn, defaults.maxToolCallsPerTurn),
-                    Math.max(positiveOrDefault(maxTurnsPerRequest, defaults.maxTurnsPerRequest), defaults.maxTurnsPerRequest));
+                    Math.max(positiveOrDefault(maxTurnsPerRequest, defaults.maxTurnsPerRequest), defaults.maxTurnsPerRequest),
+                    boolOrDefault(exposeLowLevelTools, defaults.exposeLowLevelTools),
+                    boolOrDefault(enableMemoryTools, defaults.enableMemoryTools),
+                    boolOrDefault(enableCoordinationTools, defaults.enableCoordinationTools),
+                    positiveOrDefault(maxTaskRetries, defaults.maxTaskRetries));
+        }
+
+        public boolean exposesLowLevelTools() {
+            return Boolean.TRUE.equals(exposeLowLevelTools);
+        }
+
+        public boolean memoryToolsEnabled() {
+            return Boolean.TRUE.equals(enableMemoryTools);
+        }
+
+        public boolean coordinationToolsEnabled() {
+            return Boolean.TRUE.equals(enableCoordinationTools);
         }
     }
 
@@ -210,5 +234,9 @@ public record AIBotConfig(
 
     private static int positiveOrDefault(int value, int defaultValue) {
         return value > 0 ? value : defaultValue;
+    }
+
+    private static Boolean boolOrDefault(Boolean value, Boolean defaultValue) {
+        return value == null ? defaultValue : value;
     }
 }
