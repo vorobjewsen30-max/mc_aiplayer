@@ -1,13 +1,12 @@
 package io.github.zoyluo.aibot.pathfinding;
 
+import io.github.zoyluo.aibot.AIBotConfig;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
 public final class CostModel {
-    private static final int MAX_SAFE_FALL = 3;
-
     private CostModel() {
     }
 
@@ -18,7 +17,7 @@ public final class CostModel {
             case DIAGONAL -> 1.41D;
             case JUMP_UP -> 1.5D;
             case DROP_DOWN -> {
-                if (fallHeight > MAX_SAFE_FALL) {
+                if (fallHeight > AIBotConfig.get().nav().maxSafeFall()) {
                     yield 1000.0D;
                 }
                 yield 0.5D + 0.3D * fallHeight;

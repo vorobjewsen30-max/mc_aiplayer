@@ -1,5 +1,6 @@
 package io.github.zoyluo.aibot.action;
 
+import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.LogCategory;
 import io.github.zoyluo.aibot.log.LogFields;
@@ -15,11 +16,7 @@ public final class WalkToController {
     private static final double PROGRESS_EPSILON = 0.04D;
     private static final double HARD_PROGRESS_EPSILON = 0.005D;
     private static final int MAX_TICKS = 160;
-    private static final int SIDLE_AFTER = 12;
-    private static final int SIDLE_LIMIT = 60;
-    private static final int HARD_LIMIT = 30;
     private static final int SIDLE_STEP_TICKS = 8;
-    private static final double SPRINT_MIN_DISTANCE = 3.0D;
 
     private final Vec3d target;
     private Vec3d lastPos;
@@ -41,6 +38,7 @@ public final class WalkToController {
 
         var player = pack.player();
         ServerWorld world = player.getServerWorld();
+        AIBotConfig.Nav nav = AIBotConfig.get().nav();
         Vec3d current = player.getPos();
         double dx = target.x - current.x;
         double dz = target.z - current.z;
@@ -51,17 +49,17 @@ public final class WalkToController {
         }
 
         Vec3d move = new Vec3d(dx / horizontalDistance, 0.0D, dz / horizontalDistance);
-        SidleCommand sidle = sidleCommand(move);
+        SidleCommand sidle = sidleCommand(move, nav);
         LookAction.lookHorizontallyAt(player, current.add(sidle.lookVector.multiply(4.0D)));
         pack.setForward(1.0F);
         pack.setStrafing(sidle.strafing);
 
-        JumpDecision jump = shouldJump(current, move, world);
+        JumpDecision jump = shouldJump(current, move, world, nav);
         if (jump.jump) {
             pack.jumpOnce();
         }
         pack.setJumping(jump.jump);
-        pack.setSprinting(shouldSprint(horizontalDistance, jump, current, move, world));
+        pack.setSprinting(shouldSprint(horizontalDistance, jump, current, move, world, nav));
 
         if (lastPos != null && current.distanceTo(lastPos) < PROGRESS_EPSILON) {
             noProgressTicks++;
@@ -76,15 +74,15 @@ public final class WalkToController {
         }
         lastPos = current;
 
-        if (hardStuckTicks > HARD_LIMIT) {
+        if (hardStuckTicks > nav.hardLimit()) {
             pack.stopMovement();
             logStuck(pack, "hard", current, move, world);
             return ActionResult.failed("stuck_hard");
         }
-        if (noProgressTicks >= SIDLE_AFTER) {
+        if (noProgressTicks >= nav.sidleAfter()) {
             sidleTicks++;
         }
-        if (sidleTicks > SIDLE_LIMIT) {
+        if (sidleTicks > nav.sidleLimit()) {
             pack.stopMovement();
             logStuck(pack, "blocked", current, move, world);
             return ActionResult.failed("stuck_blocked");
@@ -92,8 +90,8 @@ public final class WalkToController {
         return ActionResult.IN_PROGRESS;
     }
 
-    private SidleCommand sidleCommand(Vec3d move) {
-        if (noProgressTicks < SIDLE_AFTER) {
+    private SidleCommand sidleCommand(Vec3d move, AIBotConfig.Nav nav) {
+        if (noProgressTicks < nav.sidleAfter()) {
             return new SidleCommand(move, 0.0F);
         }
         int step = Math.floorMod(sidleTicks / SIDLE_STEP_TICKS, 4);
@@ -105,8 +103,8 @@ public final class WalkToController {
         };
     }
 
-    private static JumpDecision shouldJump(Vec3d current, Vec3d move, ServerWorld world) {
-        BlockPos front = footPos(current, move, 1.0D);
+    private static JumpDecision shouldJump(Vec3d current, Vec3d move, ServerWorld world, AIBotConfig.Nav nav) {
+        BlockPos front = footPos(current, move, nav.jumpReach());
         BlockState frontState = world.getBlockState(front);
         BlockState aboveFront = world.getBlockState(front.up());
         BlockPos playerPos = BlockPos.ofFloored(current);
@@ -138,8 +136,8 @@ public final class WalkToController {
                 && hasCollision(world.getBlockState(landing.down()), world, landing.down());
     }
 
-    private static boolean shouldSprint(double horizontalDistance, JumpDecision jump, Vec3d current, Vec3d move, ServerWorld world) {
-        if (horizontalDistance < SPRINT_MIN_DISTANCE) {
+    private static boolean shouldSprint(double horizontalDistance, JumpDecision jump, Vec3d current, Vec3d move, ServerWorld world, AIBotConfig.Nav nav) {
+        if (horizontalDistance < nav.sprintMinDist()) {
             return false;
         }
         if (jump.blocked || (jump.jump && !jump.gap)) {

@@ -112,7 +112,7 @@ public final class MineTask extends AbstractTask {
     }
 
     private void pickup(AIPlayerEntity bot) {
-        HarvestCore.forcePickupNearby(bot, null, 1.5D, 1.0D);
+        HarvestCore.forcePickupNearby(bot, null);
         int collected = HarvestCore.totalInventoryCount(bot) - inventoryCountBeforeMining;
         if (collected > 0) {
             BotLog.action(bot, "pickup_collected", "count", collected);
@@ -129,7 +129,7 @@ public final class MineTask extends AbstractTask {
         if (pickupTicks <= 0) {
             if (!pickupSweepAttempted && HarvestCore.nearestDrop(bot, null, 8.0D).isPresent()) {
                 pickupSweepAttempted = true;
-                HarvestCore.sweepPickup(bot, null, 8.0D, 8);
+                HarvestCore.sweepPickup(bot, null, 8);
                 pickupTicks = 60;
                 return;
             }

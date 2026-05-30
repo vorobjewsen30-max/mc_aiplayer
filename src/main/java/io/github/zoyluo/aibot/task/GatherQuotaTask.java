@@ -132,7 +132,7 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private void pickup(AIPlayerEntity bot) {
-        HarvestCore.forcePickupNearby(bot, targetItem, 1.5D, 1.0D);
+        HarvestCore.forcePickupNearby(bot, targetItem);
         countSoFar = InventoryAction.countItem(bot, targetItem);
         if (countSoFar > countBeforeHarvest) {
             phase = countSoFar >= targetCount ? Phase.DONE : Phase.SURVEY;
@@ -143,7 +143,7 @@ public final class GatherQuotaTask extends AbstractTask {
         if (pickupTicks <= 0) {
             if (!pickupSweepAttempted && HarvestCore.nearestDrop(bot, targetItem, 8.0D).isPresent()) {
                 pickupSweepAttempted = true;
-                HarvestCore.sweepPickup(bot, targetItem, 8.0D, 8);
+                HarvestCore.sweepPickup(bot, targetItem, 8);
                 pickupTicks = 60;
                 return;
             }

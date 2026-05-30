@@ -202,7 +202,7 @@ public final class FishTask extends AbstractTask {
 
     private void collect(AIPlayerEntity bot) {
         phaseTicks++;
-        HarvestCore.forcePickupNearby(bot, null, 1.5D, 1.0D);
+        HarvestCore.forcePickupNearby(bot, null);
         HarvestCore.chaseDrop(bot, null, 8.0D);
         if (phaseTicks < COLLECT_TICKS) {
             return;
@@ -211,7 +211,7 @@ public final class FishTask extends AbstractTask {
             catches++;
         } else if (!collectSweepAttempted && HarvestCore.nearestDrop(bot, null, 8.0D).isPresent()) {
             collectSweepAttempted = true;
-            HarvestCore.sweepPickup(bot, null, 8.0D, 8);
+            HarvestCore.sweepPickup(bot, null, 8);
             phaseTicks = 0;
             return;
         }

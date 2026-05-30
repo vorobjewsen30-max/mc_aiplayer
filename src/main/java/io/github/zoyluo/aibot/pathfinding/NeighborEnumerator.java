@@ -1,5 +1,6 @@
 package io.github.zoyluo.aibot.pathfinding;
 
+import io.github.zoyluo.aibot.AIBotConfig;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.registry.tag.BlockTags;
@@ -128,7 +129,8 @@ public final class NeighborEnumerator {
         if (!collisionEmpty(world, target.up())) {
             return null;
         }
-        for (int fall = 1; fall <= 3; fall++) {
+        int maxFall = AIBotConfig.get().nav().maxSafeFall();
+        for (int fall = 1; fall <= maxFall; fall++) {
             BlockPos landing = target.down(fall);
             if (Standability.isStandable(world, landing)) {
                 return new NeighborCandidate(landing, MoveType.DROP_DOWN, fall);

@@ -1,5 +1,6 @@
 package io.github.zoyluo.aibot.action;
 
+import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.pathfinding.Standability;
@@ -72,8 +73,13 @@ public final class HarvestCore {
         return picked;
     }
 
+    public static boolean forcePickupNearby(AIPlayerEntity bot, Item item) {
+        AIBotConfig.Pickup pickup = AIBotConfig.get().pickup();
+        return forcePickupNearby(bot, item, pickup.forceRadiusH(), pickup.forceRadiusV());
+    }
+
     public static void chaseDrop(AIPlayerEntity bot, Item item, double radius) {
-        if (forcePickupNearby(bot, item, 1.5D, 1.0D)) {
+        if (forcePickupNearby(bot, item)) {
             bot.getActionPack().stopMovement();
             return;
         }
@@ -94,7 +100,7 @@ public final class HarvestCore {
     public static int sweepPickup(AIPlayerEntity bot, Item item, double radius, int maxTargets) {
         int picked = 0;
         for (int i = 0; i < maxTargets; i++) {
-            if (!forcePickupNearby(bot, item, 1.5D, 1.0D)) {
+            if (!forcePickupNearby(bot, item)) {
                 break;
             }
             picked++;
@@ -111,6 +117,10 @@ public final class HarvestCore {
             }
         });
         return 0;
+    }
+
+    public static int sweepPickup(AIPlayerEntity bot, Item item, int maxTargets) {
+        return sweepPickup(bot, item, AIBotConfig.get().pickup().sweepRadius(), maxTargets);
     }
 
     public static int totalInventoryCount(AIPlayerEntity bot) {

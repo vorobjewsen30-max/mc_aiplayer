@@ -319,14 +319,14 @@ public final class OreSeekTask extends AbstractTask {
     }
 
     private void mineVein(AIPlayerEntity bot) {
-        HarvestCore.forcePickupNearby(bot, null, 1.5D, 1.0D);
+        HarvestCore.forcePickupNearby(bot, null);
         HarvestCore.chaseDrop(bot, null, 6.0D); // 持续吸附掉落物
         ServerWorld world = bot.getServerWorld();
         if (currentVeinBlock == null) {
             currentVeinBlock = veinQueue.pollFirst();
             if (currentVeinBlock == null) {
                 // 矿脉挖完:结算拾取增量
-                HarvestCore.sweepPickup(bot, null, 6.0D, 12);
+                HarvestCore.sweepPickup(bot, null, 12);
                 int gained = Math.max(0, HarvestCore.totalInventoryCount(bot) - invBeforeMining);
                 if (gained <= 0 && veinPickupTicks-- > 0 && HarvestCore.nearestDrop(bot, null, 6.0D).isPresent()) {
                     return;

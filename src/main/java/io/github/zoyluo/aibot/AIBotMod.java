@@ -33,6 +33,8 @@ public class AIBotMod implements ModInitializer {
         BotLog.config("config_loaded",
                 "deepseek_model", config.deepseek().model(),
                 "perception_radius", config.perception().radius(),
+                "nav_lookahead", config.nav().lookahead(),
+                "pickup_force_radius", config.pickup().forceRadiusH(),
                 "logging_enabled", config.logging().enabled());
 
         LOGGER.info("================================");
@@ -66,6 +68,7 @@ public class AIBotMod implements ModInitializer {
             BotTickCoordinator.INSTANCE.tick(server);
             AIBotVerifySubcommand.tick(server);
             AIBotServerNetworking.INSTANCE.tick(server);
+            io.github.zoyluo.aibot.log.DiagnosticLogger.INSTANCE.tick(server);
             if (server.getTicks() > 0 && server.getTicks() % 6000 == 0) {
                 BotPersistence.INSTANCE.saveAllAsync(server);
             }

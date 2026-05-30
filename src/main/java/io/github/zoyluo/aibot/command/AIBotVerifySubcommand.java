@@ -3,6 +3,7 @@ package io.github.zoyluo.aibot.command;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.github.zoyluo.aibot.AIBotConfig;
+import io.github.zoyluo.aibot.action.HarvestCore;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.coordination.TaskBoard;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
@@ -15,6 +16,8 @@ import io.github.zoyluo.aibot.task.CombatTask;
 import io.github.zoyluo.aibot.task.ContainerTask;
 import io.github.zoyluo.aibot.task.CraftTask;
 import io.github.zoyluo.aibot.task.FarmTask;
+import io.github.zoyluo.aibot.task.MoveTask;
+import io.github.zoyluo.aibot.task.OreSeekTask;
 import io.github.zoyluo.aibot.task.SleepTask;
 import io.github.zoyluo.aibot.task.StripMineTask;
 import io.github.zoyluo.aibot.task.Task;
@@ -24,6 +27,7 @@ import io.github.zoyluo.aibot.task.TaskStatus;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.SpawnReason;
 import net.minecraft.entity.mob.ZombieEntity;
 import net.minecraft.inventory.Inventory;
@@ -63,7 +67,12 @@ public final class AIBotVerifySubcommand {
             "memory",
             "job",
             "craft_chain",
-            "drowning");
+            "drowning",
+            "nav_obstacle",
+            "nav_gap",
+            "pickup_blocked",
+            "mine_to_iron",
+            "nav_descend");
     private static final Map<UUID, VerifyRun> RUNS = new ConcurrentHashMap<>();
 
     private AIBotVerifySubcommand() {
@@ -151,6 +160,11 @@ public final class AIBotVerifySubcommand {
             case "build" -> assignBuild(bot);
             case "craft_chain" -> assignCraftChain(bot);
             case "drowning" -> verifyDrowning(bot);
+            case "nav_obstacle" -> assignNavObstacle(bot);
+            case "nav_gap" -> assignNavGap(bot);
+            case "pickup_blocked" -> verifyPickupBlocked(bot);
+            case "mine_to_iron" -> assignMineToIron(bot);
+            case "nav_descend" -> assignNavDescend(bot);
             default -> Result.fail(feature, "unknown_feature");
         };
     }
@@ -269,6 +283,66 @@ public final class AIBotVerifySubcommand {
                 null,
                 bot.getBlockPos()));
         return assignTask(bot, "drowning", task, 300, status -> status.state() == TaskState.COMPLETED);
+    }
+
+    private static Result assignNavObstacle(AIPlayerEntity bot) {
+        prepareArea(bot);
+        BlockPos origin = bot.getBlockPos();
+        BlockPos obstacle = origin.offset(Direction.NORTH);
+        BlockPos goal = origin.offset(Direction.NORTH, 3);
+        bot.getServerWorld().setBlockState(obstacle, Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
+        return assignTask(bot, "nav_obstacle", new MoveTask(bot, goal), 400,
+                ignored -> bot.getBlockPos().getSquaredDistance(goal) <= 4.0D);
+    }
+
+    private static Result assignNavGap(AIPlayerEntity bot) {
+        prepareArea(bot);
+        BlockPos origin = bot.getBlockPos();
+        BlockPos gap = origin.offset(Direction.NORTH);
+        BlockPos goal = origin.offset(Direction.NORTH, 3);
+        bot.getServerWorld().setBlockState(gap.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        return assignTask(bot, "nav_gap", new MoveTask(bot, goal), 400,
+                ignored -> bot.getBlockPos().getSquaredDistance(goal) <= 4.0D);
+    }
+
+    private static Result verifyPickupBlocked(AIPlayerEntity bot) {
+        prepareArea(bot);
+        clearInventory(bot);
+        ServerWorld world = bot.getServerWorld();
+        BlockPos dropPos = bot.getBlockPos().offset(Direction.NORTH);
+        world.setBlockState(dropPos.down(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+        ItemEntity drop = new ItemEntity(world, dropPos.getX() + 0.5D, dropPos.getY(), dropPos.getZ() + 0.5D, new ItemStack(Items.COBBLESTONE, 1));
+        world.spawnEntity(drop);
+        boolean picked = HarvestCore.forcePickupNearby(bot, Items.COBBLESTONE);
+        return picked && InventoryAction.countItem(bot, Items.COBBLESTONE) >= 1
+                ? Result.pass("pickup_blocked", "forced pickup ok")
+                : Result.fail("pickup_blocked", "forced_pickup_missing");
+    }
+
+    private static Result assignMineToIron(AIPlayerEntity bot) {
+        prepareArea(bot);
+        clearInventory(bot);
+        InventoryAction.giveItem(bot, new ItemStack(Items.DIAMOND_PICKAXE, 1));
+        BlockPos ore = bot.getBlockPos().offset(Direction.NORTH, 2);
+        bot.getServerWorld().setBlockState(ore, Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        return assignTask(bot, "mine_to_iron", new OreSeekTask(java.util.Set.of(Blocks.IRON_ORE), 1),
+                1200,
+                ignored -> InventoryAction.countItem(bot, Items.RAW_IRON) >= 1);
+    }
+
+    private static Result assignNavDescend(AIPlayerEntity bot) {
+        prepareArea(bot);
+        ServerWorld world = bot.getServerWorld();
+        BlockPos origin = bot.getBlockPos();
+        BlockPos goal = origin.offset(Direction.NORTH, 3).down(3);
+        for (int i = 1; i <= 3; i++) {
+            BlockPos step = origin.offset(Direction.NORTH, i).down(i);
+            world.setBlockState(step, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlockState(step.up(), Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            world.setBlockState(step.down(), Blocks.COBBLESTONE.getDefaultState(), Block.NOTIFY_ALL);
+        }
+        return assignTask(bot, "nav_descend", new MoveTask(bot, goal), 600,
+                ignored -> bot.getBlockPos().getSquaredDistance(goal) <= 4.0D);
     }
 
     private static Result assignTask(AIPlayerEntity bot, String feature, Task task, int timeoutTicks, Predicate<TaskStatus> assertion) {

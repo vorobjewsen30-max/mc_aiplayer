@@ -22,7 +22,9 @@ public record AIBotConfig(
         Survival survival,
         Combat combat,
         Night night,
-        Mining mining
+        Mining mining,
+        Nav nav,
+        Pickup pickup
 ) {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static AIBotConfig instance = defaults();
@@ -67,7 +69,7 @@ public record AIBotConfig(
     }
 
     public AIBotConfig withDeepSeek(DeepSeek deepseek) {
-        return new AIBotConfig(deepseek, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining());
+        return new AIBotConfig(deepseek, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), nav(), pickup());
     }
 
     private AIBotConfig withDefaults() {
@@ -81,7 +83,9 @@ public record AIBotConfig(
                 survival == null ? defaults.survival : survival.withDefaults(defaults.survival),
                 combat == null ? defaults.combat : combat.withDefaults(defaults.combat),
                 night == null ? defaults.night : night.withDefaults(defaults.night),
-                mining == null ? defaults.mining : mining.withDefaults(defaults.mining));
+                mining == null ? defaults.mining : mining.withDefaults(defaults.mining),
+                nav == null ? defaults.nav : nav.withDefaults(defaults.nav),
+                pickup == null ? defaults.pickup : pickup.withDefaults(defaults.pickup));
     }
 
     public static AIBotConfig defaults() {
@@ -104,7 +108,9 @@ public record AIBotConfig(
                 new Survival(14, 6),
                 new Combat(10, 2),
                 new Night(true, 8),
-                new Mining(2, 0.10D, true));
+                new Mining(2, 0.10D, true),
+                new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3),
+                new Pickup(1.5D, 1.0D, 8.0D));
     }
 
     public record DeepSeek(
@@ -215,6 +221,36 @@ public record AIBotConfig(
         }
     }
 
+    public record Nav(double jumpReach,
+                      int sidleAfter,
+                      int sidleLimit,
+                      int hardLimit,
+                      int lookahead,
+                      int nodeRetry,
+                      double sprintMinDist,
+                      int maxSafeFall) {
+        Nav withDefaults(Nav defaults) {
+            return new Nav(
+                    positiveDoubleOrDefault(jumpReach, defaults.jumpReach),
+                    positiveOrDefault(sidleAfter, defaults.sidleAfter),
+                    positiveOrDefault(sidleLimit, defaults.sidleLimit),
+                    positiveOrDefault(hardLimit, defaults.hardLimit),
+                    positiveOrDefault(lookahead, defaults.lookahead),
+                    positiveOrDefault(nodeRetry, defaults.nodeRetry),
+                    positiveDoubleOrDefault(sprintMinDist, defaults.sprintMinDist),
+                    positiveOrDefault(maxSafeFall, defaults.maxSafeFall));
+        }
+    }
+
+    public record Pickup(double forceRadiusH, double forceRadiusV, double sweepRadius) {
+        Pickup withDefaults(Pickup defaults) {
+            return new Pickup(
+                    positiveDoubleOrDefault(forceRadiusH, defaults.forceRadiusH),
+                    positiveDoubleOrDefault(forceRadiusV, defaults.forceRadiusV),
+                    positiveDoubleOrDefault(sweepRadius, defaults.sweepRadius));
+        }
+    }
+
     public record Watchdog(int stuckWindowTicks) {
         Watchdog withDefaults(Watchdog defaults) {
             return new Watchdog(positiveOrDefault(stuckWindowTicks, defaults.stuckWindowTicks));
@@ -250,6 +286,10 @@ public record AIBotConfig(
 
     private static int positiveOrDefault(int value, int defaultValue) {
         return value > 0 ? value : defaultValue;
+    }
+
+    private static double positiveDoubleOrDefault(double value, double defaultValue) {
+        return value > 0.0D ? value : defaultValue;
     }
 
     private static Boolean boolOrDefault(Boolean value, Boolean defaultValue) {

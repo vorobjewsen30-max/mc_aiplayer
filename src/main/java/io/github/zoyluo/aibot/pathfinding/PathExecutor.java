@@ -1,5 +1,6 @@
 package io.github.zoyluo.aibot.pathfinding;
 
+import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.action.ActionPack;
 import io.github.zoyluo.aibot.action.ActionResult;
 import io.github.zoyluo.aibot.action.BuildAction;
@@ -23,8 +24,6 @@ import java.util.List;
 public final class PathExecutor {
     private static final int STUCK_TICKS_LIMIT = 60;
     private static final int REPLAN_COOLDOWN_TICKS = 40;
-    private static final int LOOKAHEAD = 4;
-    private static final int NODE_RETRY = 2;
 
     private List<Node> path;
     private int index = 1;
@@ -226,7 +225,7 @@ public final class PathExecutor {
     private int chooseWalkTargetIndex(ActionPack pack) {
         int best = index;
         BlockPos from = pack.player().getBlockPos();
-        int max = Math.min(path.size() - 1, index + LOOKAHEAD);
+        int max = Math.min(path.size() - 1, index + AIBotConfig.get().nav().lookahead());
         for (int candidate = index + 1; candidate <= max; candidate++) {
             if (!canStringPullTo(from, candidate)) {
                 break;
@@ -255,7 +254,7 @@ public final class PathExecutor {
     }
 
     private ActionResult handleWalkFailure(ActionPack pack, String reason) {
-        if (reason.contains("stuck_blocked") && nodeRetry < NODE_RETRY) {
+        if (reason.contains("stuck_blocked") && nodeRetry < AIBotConfig.get().nav().nodeRetry()) {
             nodeRetry++;
             int previous = index;
             index = Math.max(1, index - 1);
