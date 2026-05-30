@@ -9,6 +9,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class Standability {
@@ -30,6 +31,62 @@ public final class Standability {
         boolean result = compute(world, pos);
         CACHE.put(key, result);
         return result;
+    }
+
+    public static Optional<BlockPos> findNearestStandable(ServerWorld world,
+                                                          BlockPos origin,
+                                                          int horizontalRadius,
+                                                          int verticalDown,
+                                                          int verticalUp) {
+        Optional<BlockPos> sameColumn = findStandableInColumn(world, origin, verticalDown, verticalUp);
+        if (sameColumn.isPresent()) {
+            return sameColumn;
+        }
+
+        int radiusLimit = Math.max(0, horizontalRadius);
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (int radius = 1; radius <= radiusLimit; radius++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) {
+                        continue;
+                    }
+                    Optional<BlockPos> candidate = findStandableInColumn(world, origin.add(dx, 0, dz), verticalDown, verticalUp);
+                    if (candidate.isEmpty()) {
+                        continue;
+                    }
+                    double distance = candidate.get().getSquaredDistance(origin);
+                    if (distance < bestDistance) {
+                        best = candidate.get();
+                        bestDistance = distance;
+                    }
+                }
+            }
+            if (best != null) {
+                return Optional.of(best.toImmutable());
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<BlockPos> findStandableInColumn(ServerWorld world, BlockPos origin, int verticalDown, int verticalUp) {
+        int topY = world.getBottomY() + world.getHeight();
+        int minY = Math.max(world.getBottomY() + 1, origin.getY() - Math.max(0, verticalDown));
+        int maxY = Math.min(topY - 2, origin.getY() + Math.max(0, verticalUp));
+        for (int y = Math.min(origin.getY(), maxY); y >= minY; y--) {
+            BlockPos candidate = new BlockPos(origin.getX(), y, origin.getZ());
+            if (isStandable(world, candidate)) {
+                return Optional.of(candidate.toImmutable());
+            }
+        }
+        for (int y = Math.max(origin.getY() + 1, minY); y <= maxY; y++) {
+            BlockPos candidate = new BlockPos(origin.getX(), y, origin.getZ());
+            if (isStandable(world, candidate)) {
+                return Optional.of(candidate.toImmutable());
+            }
+        }
+        return Optional.empty();
     }
 
     private static boolean compute(ServerWorld world, BlockPos pos) {

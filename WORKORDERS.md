@@ -180,3 +180,52 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 ## 进度勾选(Codex 做完一张勾一张)
 - [x] RL-1 done: 失败记录、消费式诊断注入和 maxTaskRetries 配置已实现,编译通过。  [x] RL-2 done: plan_craft 只读预检与 missing source 提示已实现,编译通过。  [x] RL-3 done: StuckWatcher、isWaiting 豁免和 stuck 失败回灌已实现,编译通过。  [x] RL-4 done: perception highlights 与 includeRawLists=false 默认裁剪已实现,编译通过。  [x] RL-5 done: /aibot verify 矩阵、跨 tick 轮询和 craft_chain 自动工作台清账已实现,编译通过。  [x] RL-6 done: RuntimeException 边界、API 错误分类、BuildTask 空安全和统一 timeout reason 已实现,编译通过。  [x] RL-7 done: 持久化原子写/异步单飞、owner 恢复和维度兜底已实现,编译通过。  [x] RL-8 done: 目标记忆摘要、任务完成续推和 idle 目标唤起已实现,编译通过。  [ ] RL-9  [ ] RL-10
 - [ ] RL-11 [ ] RL-12 [ ] RL-13 [ ] RL-14 [ ] RL-15 [ ] RL-16 [ ] RL-17 [ ] RL-18 [ ] RL-19 [ ] RL-20
+
+---
+
+# 审查记录 · RL-1 … RL-20 验证(2026-05-30,Claude 审查)
+
+## 结构性验证:全面通过 ✅
+- **提交**:RL-1…RL-20 共 20 个独立 commit + 1 个 audit 提交,顺序正确。
+- **完成度**:无 blocked、代码无 `BLOCKED` TODO。
+- **编译**:`./gradlew clean compileJava compileClientJava` 全过 → 20 步所有 ⚠️VERIFY 的 1.21.3 API 解析正确。
+- **铁律 G1**:`TaskManager.assign` 仅在 `DangerWatcher`/`IdleCoordinator` 两个编排器;新任务类(Gather/Resupply/Guard/Follow/Hold/Combat/Fish/Trade…)内部零 assign;`CombatCore` 抽取给 Guard/Combat 共用。
+- **RL-9 watcher 合并**:`BotTickCoordinator` 单次 all-bots 遍历;三 watcher 重构为 `scanBot/tickBot`;`tickAll` 在 AIBotMod 只调一次(无双 tick);danger 用更高频 `dangerScanInterval`,危险响应未退化。
+- **新文件**:HarvestCore / AcquisitionHints / BotReporter / ReasonText / SetOptionC2S / TaskCard / GoalCard / SettingsCard 全部就位。
+- **抽查 TradeTask**:直接结算不开 MerchantScreen(G3);显式只选单输入 offer;canFit→扣款→给货 顺序安全。
+
+> **未覆盖:运行期行为**(编译过 ≠ 行为对)。需在 dev server 实测,见下。
+
+## 运行期核验清单(用户在游戏里跑,结果回填)
+- [ ] `/aibot verify all` → 记录各 feature 的 PASS / FAIL
+- [ ] 端到端「帮我从原料造一把铁镐」:全程走高层任务(不再 `mine_block` 空转)、缺料自动补齐、背包真增长、中文反馈只在面板(RL-1/2/4/10)
+- [ ] 停服 → 重启:bot 原位/背包/维度/owner 全恢复(RL-7)
+- [ ] `gather cobblestone 64`:持续采集到量,满仓存箱续采(RL-12)
+- [ ] 缺料 craft:失败→自动补料→成功;同失败 ≤3 次后改方案,不无限重试(RL-1)
+- [ ] 够不到的方块 mine:~10s 自救 abort;冶炼/睡觉不误杀(RL-3)
+- [ ] 多 bot(5–10)同时干活:TPS ≥ 19(RL-9)
+- [ ] 战斗 / 钓鱼 / 交易 各跑一次(RL-18/19/20)
+
+## 修复工单池(运行期发现 → 登记于此 → 交 Codex 修)
+- [ ] **FIX-1** `TradeTask.afterUsing` 现走反射(`afterUsing`/`method_18008`):若 1.21.3 该方法可直接调用则改直调,保留反射兜底。(静态审查发现,低优)
+- [ ] **FIX-2(核心,P0)** 矿物采集走"下挖到矿层"策略,而非 naive MineTask
+  - **现象**:地表(y=105)`帮我挖一些铁矿` → `assign_task mine iron_ore` 连续 `no_block_found:minecraft:iron_ore` 秒失败、反复重试无效。
+  - **根因**:`MineTask` 只在局部体积(水平 12→48、**垂直仅 ±6 `VERTICAL_SPAN`**)扫**已暴露**方块;地下矿石扫不到,且它**不会下挖**。
+  - **改**:
+    (a) **StripMineTask 增"自动下井"**:目标是矿石且局部扫描找不到时,先挖楼梯/竖井**下到该矿合适 Y 段**(iron 地下普遍、深板岩层更密),再支巷 + `OreScan` 跟矿脉。自包含状态机(G1,不 assign 子任务)。先确认现有 StripMineTask 是否在当前 Y 平挖——若是,补"先 descend 到矿层"。
+    (b) **工具/Prompt 引导**:`assign_task` 的 `mine` 描述 + `systemPrompt` 明确:**矿石(`*_ore`)用 `strip_mine`,不要用 `mine`**;`mine` 只挖地表/已暴露方块。
+  - **验收**:地表对 Bob 说"帮我挖一些铁矿" → 自动下挖到矿层、找到并挖回,`raw_iron` 进背包(全程不再 `no_block_found` 空转)。
+
+- [x] **FIX-3(P0,本次失败的真正主因)** 寻路容错:`GOAL_NOT_STANDABLE` / `NO_START` 自救(卡树顶/非法站位) ✅ done: A* 终点吸附、非法起点安全校正、重寻路与 spawn/restore 站位校正已实现, compileJava/compileClientJava 通过。
+  - **现象**:Bob 困在 y=105 树冠,本次会话**十余次** `pathfinding_failed: GOAL_NOT_STANDABLE`(LLM 给的落点在空中/树叶里不可站)+ 最终 `NO_START`(自身位置也不可站)→ 完全无法移动 → 一切采集/挖矿失败到 max_turns。**这才是这次"挖铁矿失败"的根本原因——bot 根本下不了树、动不了,压根没走到挖矿那步。**
+  - **根因**:`AStarPathfinder` 起点或终点 `!isStandable` 时**直接失败、零容错**(`elapsed_ticks=0`):起点不可站 → `NO_START`;终点不可站 → `GOAL_NOT_STANDABLE`。而 LLM 在树冠里只能猜坐标,几乎必然不可站。
+  - **改**:
+    (a) **终点吸附**:`GOAL_NOT_STANDABLE` 时不直接失败,先把 goal **吸附到最近可站方块**(沿该列向下扫地面 → 再周边邻格),用吸附后的 goal 重算。
+    (b) **起点吸附/脱困**:`NO_START` 时把 start 吸附到最近可站点(向下找地面);若不可达,触发"脱困"——向下挖/逐格下落到实地后再寻路。
+    (c) 次要:排查为何 bot 会停在 y=105 树冠(疑似持久化(RL-7)恢复到上次卡树的位置,或 forage 砍树后遗留站位)——恢复/出生时校正到脚下实地。
+  - **验收**:把 bot 放树顶/半空再派 move/采集 → 自动落到地面并正常寻路,不再 `GOAL_NOT_STANDABLE`/`NO_START` 死循环。
+
+- [ ] **FIX-4(P1)** 失败原因可执行 + RL-1 换策略引导(防原地重试同一招)
+  - **现象**:`no_block_found` 后 LLM 重试**同一个** `mine iron_ore` 共 4 次(count 1→4)才放弃。
+  - **改**:(a) MineTask 目标是 `*_ore` 且扫不到 → reason 带建议,如 `no_exposed_ore:use_strip_mine`;(b) RL-1 同(任务+原因)重复 ≥2 次时,注入消息**明确要求换方法**(别再 `mine` 同一矿,改 `strip_mine`/下挖)。
+  - **验收**:地表挖矿失败一次后,LLM 即改用 `strip_mine`,不再重复 `mine` 同一矿石。

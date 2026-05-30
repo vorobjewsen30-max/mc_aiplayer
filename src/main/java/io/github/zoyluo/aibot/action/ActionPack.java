@@ -6,9 +6,14 @@ import io.github.zoyluo.aibot.log.LogCategory;
 import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
 import io.github.zoyluo.aibot.pathfinding.PathExecutor;
 import io.github.zoyluo.aibot.pathfinding.PathfindingResult;
+import io.github.zoyluo.aibot.pathfinding.Standability;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+
+import java.util.Collections;
+import java.util.Optional;
 
 public final class ActionPack {
     private static final int PATHFIND_SUCCESS_COOLDOWN_TICKS = 5;
@@ -29,6 +34,7 @@ public final class ActionPack {
     private int itemUseCooldown;
     private int blockHitDelay;
     private BlockPos lastPathGoal;
+    private BlockPos activePathGoal;
     private int nextPathfindTick;
 
     public ActionPack(AIPlayerEntity player) {
@@ -84,19 +90,62 @@ public final class ActionPack {
         if (lastPathGoal != null && lastPathGoal.equals(immutableGoal) && now < nextPathfindTick) {
             return ActionResult.failed("pathfinding_throttled");
         }
+        if (!snapPlayerToNearestStandable("path_start_invalid")) {
+            lastPathGoal = immutableGoal;
+            activePathGoal = null;
+            nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
+            return ActionResult.failed("pathfinding_failed: NO_START");
+        }
         AStarPathfinder finder = new AStarPathfinder(player.getServerWorld(), player.getBlockPos(), goal);
         PathfindingResult result = finder.findPath();
         if (!result.success()) {
             lastPathGoal = immutableGoal;
+            activePathGoal = null;
             nextPathfindTick = now + PATHFIND_FAILURE_COOLDOWN_TICKS;
             return ActionResult.failed("pathfinding_failed: " + result.reason());
         }
         lastPathGoal = immutableGoal;
         nextPathfindTick = now + PATHFIND_SUCCESS_COOLDOWN_TICKS;
-        this.pathExecutor = new PathExecutor(result.path(), goal);
+        BlockPos resolvedGoal = result.resolvedGoal() == null ? immutableGoal : result.resolvedGoal();
+        activePathGoal = resolvedGoal;
+        this.pathExecutor = new PathExecutor(result.path(), resolvedGoal);
         this.walkTo = null;
         this.mining = null;
         return ActionResult.IN_PROGRESS;
+    }
+
+    public BlockPos activePathGoal() {
+        return activePathGoal;
+    }
+
+    public boolean snapPlayerToNearestStandable(String reason) {
+        ServerWorld world = player.getServerWorld();
+        BlockPos current = player.getBlockPos();
+        Standability.clearCache();
+        if (Standability.isStandable(world, current)) {
+            return true;
+        }
+        Optional<BlockPos> snapped = Standability.findNearestStandable(world, current, 8, 128, 32);
+        if (snapped.isEmpty()) {
+            BotLog.warn(LogCategory.PATH, player, "path_start_snap_failed", "reason", reason, "from", io.github.zoyluo.aibot.log.LogFields.pos(current));
+            return false;
+        }
+        BlockPos safe = snapped.get();
+        stopMovement();
+        player.teleport(world,
+                safe.getX() + 0.5D,
+                safe.getY(),
+                safe.getZ() + 0.5D,
+                Collections.emptySet(),
+                player.getYaw(),
+                player.getPitch(),
+                true);
+        Standability.clearCache();
+        BotLog.path(player, "path_start_snapped",
+                "reason", reason,
+                "from", io.github.zoyluo.aibot.log.LogFields.pos(current),
+                "to", io.github.zoyluo.aibot.log.LogFields.pos(safe));
+        return true;
     }
 
     public ActionResult startMining(BlockPos pos, Direction face) {
@@ -129,6 +178,7 @@ public final class ActionPack {
             pathExecutor.abort(this);
             pathExecutor = null;
         }
+        activePathGoal = null;
         stopMining();
         this.walkTo = null;
         stopMovement();
@@ -218,6 +268,7 @@ public final class ActionPack {
             BotLog.warn(LogCategory.ERROR, player, "path_failed", "reason", result.reason());
         }
         pathExecutor = null;
+        activePathGoal = null;
         forward = 0.0F;
         strafing = 0.0F;
         jumping = false;

@@ -12,6 +12,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
 
@@ -51,17 +52,19 @@ public final class AStarPathfinder {
     public PathfindingResult findPath() {
         long startTime = System.currentTimeMillis();
         BotLog.path(null, "findpath_start", "start", LogFields.pos(start), "goal", LogFields.pos(goal));
-        CacheKey cacheKey = new CacheKey(world.getRegistryKey().getValue().toString(), start, goal, maxNodes, maxMillis);
+        Standability.clearCache();
+        BlockPos effectiveStart = resolveEndpoint(start, true);
+        if (effectiveStart == null) {
+            return done(PathfindingResult.failure(FailureReason.NO_START, 0, elapsed(startTime)));
+        }
+        BlockPos effectiveGoal = resolveEndpoint(goal, false);
+        if (effectiveGoal == null) {
+            return done(PathfindingResult.failure(FailureReason.GOAL_NOT_STANDABLE, 0, elapsed(startTime)));
+        }
+        CacheKey cacheKey = new CacheKey(world.getRegistryKey().getValue().toString(), effectiveStart, effectiveGoal, maxNodes, maxMillis);
         PathfindingResult cached = cached(cacheKey, startTime);
         if (cached != null) {
             return cached;
-        }
-        Standability.clearCache();
-        if (!Standability.isStandable(world, start)) {
-            return done(cache(cacheKey, PathfindingResult.failure(FailureReason.NO_START, 0, elapsed(startTime)), startTime));
-        }
-        if (!Standability.isStandable(world, goal)) {
-            return done(cache(cacheKey, PathfindingResult.failure(FailureReason.GOAL_NOT_STANDABLE, 0, elapsed(startTime)), startTime));
         }
 
         PriorityQueue<Node> open = new PriorityQueue<>(Comparator
@@ -70,9 +73,9 @@ public final class AStarPathfinder {
         Map<BlockPos, Double> gScore = new HashMap<>();
         Set<BlockPos> closed = new HashSet<>();
 
-        Node startNode = new Node(start, 0.0D, CostModel.heuristic(start, goal), MoveType.WALK, null);
+        Node startNode = new Node(effectiveStart, 0.0D, CostModel.heuristic(effectiveStart, effectiveGoal), MoveType.WALK, null);
         open.add(startNode);
-        gScore.put(start, 0.0D);
+        gScore.put(effectiveStart, 0.0D);
 
         int explored = 0;
         while (!open.isEmpty()) {
@@ -88,7 +91,7 @@ public final class AStarPathfinder {
                 continue;
             }
             explored++;
-            if (current.pos().equals(goal)) {
+            if (current.pos().equals(effectiveGoal)) {
                 return done(cache(cacheKey, PathfindingResult.success(reconstruct(current), explored, elapsed(startTime)), startTime));
             }
 
@@ -105,12 +108,27 @@ public final class AStarPathfinder {
                 open.add(new Node(
                         neighbor.pos(),
                         tentativeG,
-                        CostModel.heuristic(neighbor.pos(), goal),
+                        CostModel.heuristic(neighbor.pos(), effectiveGoal),
                         neighbor.moveType(),
                         current));
             }
         }
         return done(cache(cacheKey, PathfindingResult.failure(FailureReason.GOAL_UNREACHABLE, explored, elapsed(startTime)), startTime));
+    }
+
+    private BlockPos resolveEndpoint(BlockPos requested, boolean startPoint) {
+        if (Standability.isStandable(world, requested)) {
+            return requested;
+        }
+        Optional<BlockPos> snapped = Standability.findNearestStandable(world, requested, 8, 128, 32);
+        if (snapped.isEmpty()) {
+            return null;
+        }
+        BotLog.path(null,
+                startPoint ? "findpath_start_snapped" : "findpath_goal_snapped",
+                "from", LogFields.pos(requested),
+                "to", LogFields.pos(snapped.get()));
+        return snapped.get();
     }
 
     private static PathfindingResult cached(CacheKey key, long startTime) {

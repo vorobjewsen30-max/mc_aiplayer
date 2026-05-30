@@ -152,6 +152,10 @@ public final class PathExecutor {
             lastReplanTick = now;
             replanTried = true;
             BotLog.path(pack.player(), "path_stuck", "at_node", reason, "stuck_ticks", stuckTicks);
+            if (!pack.snapPlayerToNearestStandable("path_replan_start_invalid")) {
+                cleanup(pack);
+                return ActionResult.failed(reason + "; replan_failed: NO_START");
+            }
             AStarPathfinder finder = new AStarPathfinder(pack.player().getServerWorld(), pack.player().getBlockPos(), originalGoal);
             PathfindingResult fresh = finder.findPath();
             if (fresh.success()) {

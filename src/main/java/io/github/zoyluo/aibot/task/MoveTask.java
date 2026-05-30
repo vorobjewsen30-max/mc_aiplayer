@@ -7,6 +7,7 @@ import net.minecraft.util.math.BlockPos;
 public final class MoveTask extends AbstractTask {
     private final BlockPos goal;
     private final double startDistance;
+    private BlockPos resolvedGoal;
 
     public MoveTask(BlockPos start, BlockPos goal) {
         this.goal = goal.toImmutable();
@@ -40,12 +41,14 @@ public final class MoveTask extends AbstractTask {
         ActionResult result = bot.getActionPack().startPathTo(goal);
         if (result.isFailed()) {
             fail(result.reason());
+            return;
         }
+        resolvedGoal = bot.getActionPack().activePathGoal();
     }
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        if (bot.getBlockPos().getSquaredDistance(goal) <= 2.25D) {
+        if (bot.getBlockPos().getSquaredDistance(currentGoal()) <= 2.25D) {
             complete();
             return;
         }
@@ -63,7 +66,13 @@ public final class MoveTask extends AbstractTask {
         ActionResult result = bot.getActionPack().startPathTo(goal);
         if (result.isFailed()) {
             fail(result.reason());
+            return;
         }
+        resolvedGoal = bot.getActionPack().activePathGoal();
+    }
+
+    private BlockPos currentGoal() {
+        return resolvedGoal == null ? goal : resolvedGoal;
     }
 
     private static String compact(BlockPos pos) {

@@ -7,6 +7,7 @@ import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.log.LogFields;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.network.FakeClientConnection;
+import io.github.zoyluo.aibot.pathfinding.Standability;
 import io.github.zoyluo.aibot.persist.BotPersistence;
 import io.github.zoyluo.aibot.persist.BotRecord;
 import io.github.zoyluo.aibot.task.TaskManager;
@@ -23,6 +24,7 @@ import net.minecraft.text.Text;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 import net.minecraft.world.World;
@@ -78,9 +80,10 @@ public final class AIPlayerManager {
         AIPlayerEntity player = new AIPlayerEntity(server, world, profile, options);
         FakeClientConnection connection = new FakeClientConnection(NetworkSide.SERVERBOUND);
         ConnectedClientData clientData = new ConnectedClientData(profile, 0, options, false);
+        Vec3d safePos = safeSpawnPosition(world, pos, name);
 
         server.getPlayerManager().onPlayerConnect(connection, player, clientData);
-        player.teleport(world, pos.x, pos.y, pos.z, Collections.emptySet(), yaw, pitch, true);
+        player.teleport(world, safePos.x, safePos.y, safePos.z, Collections.emptySet(), yaw, pitch, true);
         player.setHealth(20.0F);
         player.reviveForAIBotSpawn();
         EntityAttributeInstance stepHeight = player.getAttributeInstance(EntityAttributes.STEP_HEIGHT);
@@ -249,6 +252,25 @@ public final class AIPlayerManager {
     private static RestoreTarget overworldSpawn(MinecraftServer server) {
         ServerWorld overworld = server.getOverworld();
         return new RestoreTarget(overworld, Vec3d.ofBottomCenter(overworld.getSpawnPos()), true);
+    }
+
+    private static Vec3d safeSpawnPosition(ServerWorld world, Vec3d requested, String name) {
+        BlockPos requestedBlock = BlockPos.ofFloored(requested);
+        Standability.clearCache();
+        if (Standability.isStandable(world, requestedBlock)) {
+            return requested;
+        }
+        Optional<BlockPos> safe = Standability.findNearestStandable(world, requestedBlock, 8, 128, 32);
+        if (safe.isEmpty()) {
+            BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, null, "bot_spawn_position_unsafe",
+                    "name", name, "requested", LogFields.pos(requestedBlock));
+            return requested;
+        }
+        BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.LIFECYCLE, null, "bot_spawn_position_snapped",
+                "name", name,
+                "from", LogFields.pos(requestedBlock),
+                "to", LogFields.pos(safe.get()));
+        return Vec3d.ofBottomCenter(safe.get());
     }
 
     private static String normalizeName(String name) {
