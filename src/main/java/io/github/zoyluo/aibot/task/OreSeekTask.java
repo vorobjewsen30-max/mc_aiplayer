@@ -7,9 +7,11 @@ import io.github.zoyluo.aibot.action.ToolSelector;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mining.OreScan;
+import io.github.zoyluo.aibot.mining.ToolTier;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
+import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -53,6 +55,7 @@ public final class OreSeekTask extends AbstractTask {
     private static final int FREE_SLOTS_RETURN = 2;
 
     private final Set<Block> targetOres;
+    private final Set<Item> targetDrops;
     private final int targetCount;
 
     private Phase phase = Phase.SCAN;
@@ -64,6 +67,7 @@ public final class OreSeekTask extends AbstractTask {
     private BlockPos targetOre;
     private int approachStartTick;
     private boolean miningStarted;
+    private boolean toolGateChecked;
     private int invBeforeMining;
     private int collected;
     private int veinPickupTicks;
@@ -79,6 +83,7 @@ public final class OreSeekTask extends AbstractTask {
                 ? OreScan.COMMON_ORES
                 : OreScan.expandOreFamilies(targetOres);
         this.targetOres = expanded;
+        this.targetDrops = HarvestCore.expectedDropsFor(expanded);
         this.targetCount = Math.max(1, targetCount);
     }
 
@@ -111,6 +116,7 @@ public final class OreSeekTask extends AbstractTask {
     protected void onStart(AIPlayerEntity bot) {
         phase = Phase.SCAN;
         entryPos = bot.getBlockPos().toImmutable();
+        toolGateChecked = false;
     }
 
     @Override
@@ -132,6 +138,9 @@ public final class OreSeekTask extends AbstractTask {
 
     // ───────────── SCAN ─────────────
     private void scan(AIPlayerEntity bot) {
+        if (!ensureToolGate(bot)) {
+            return;
+        }
         if (collected >= targetCount) {
             beginReturn(bot, "target_reached");
             return;
@@ -202,6 +211,9 @@ public final class OreSeekTask extends AbstractTask {
 
     // ───────────── APPROACH ─────────────
     private void approach(AIPlayerEntity bot) {
+        if (!ensureToolGate(bot)) {
+            return;
+        }
         if (targetOre == null || !OreScan.isOre(bot.getServerWorld().getBlockState(targetOre), targetOres)) {
             // 目标已不在(被别的进程改了)→ 重新扫描
             phase = Phase.SCAN;
@@ -211,7 +223,7 @@ public final class OreSeekTask extends AbstractTask {
             bot.getActionPack().stopAll();
             phase = Phase.MINE_ORE;
             miningStarted = false;
-            invBeforeMining = HarvestCore.totalInventoryCount(bot);
+            invBeforeMining = HarvestCore.countInventoryItems(bot, targetDrops);
             return;
         }
         if (elapsed - approachStartTick > APPROACH_TIMEOUT_TICKS) {
@@ -253,7 +265,7 @@ public final class OreSeekTask extends AbstractTask {
         // 挖 step(脚位)+ step.up()(头位),清出身位,然后走过去
         BlockPos toMine = firstSolid(world, step, step.up());
         if (toMine != null) {
-            if (OreScan.adjacentHazard(world, toMine)) {
+            if (unsafeToMine(bot, world, toMine)) {
                 ignored.add(targetOre);
                 targetOre = null;
                 phase = Phase.SCAN;
@@ -282,6 +294,12 @@ public final class OreSeekTask extends AbstractTask {
             return;
         }
         if (OreScan.adjacentHazard(world, targetOre)) {
+            ignored.add(targetOre);
+            targetOre = null;
+            phase = Phase.SCAN;
+            return;
+        }
+        if (unsafeToMine(bot, world, targetOre)) {
             ignored.add(targetOre);
             targetOre = null;
             phase = Phase.SCAN;
@@ -319,16 +337,16 @@ public final class OreSeekTask extends AbstractTask {
     }
 
     private void mineVein(AIPlayerEntity bot) {
-        HarvestCore.forcePickupNearby(bot, null);
-        HarvestCore.chaseDrop(bot, null, 6.0D); // 持续吸附掉落物
+        HarvestCore.forcePickupNearbyAnyOf(bot, targetDrops);
+        HarvestCore.chaseDropAnyOf(bot, targetDrops, 6.0D); // 持续吸附目标掉落物
         ServerWorld world = bot.getServerWorld();
         if (currentVeinBlock == null) {
             currentVeinBlock = veinQueue.pollFirst();
             if (currentVeinBlock == null) {
                 // 矿脉挖完:结算拾取增量
-                HarvestCore.sweepPickup(bot, null, 12);
-                int gained = Math.max(0, HarvestCore.totalInventoryCount(bot) - invBeforeMining);
-                if (gained <= 0 && veinPickupTicks-- > 0 && HarvestCore.nearestDrop(bot, null, 6.0D).isPresent()) {
+                HarvestCore.sweepPickupAnyOf(bot, targetDrops, 12);
+                int gained = Math.max(0, HarvestCore.countInventoryItems(bot, targetDrops) - invBeforeMining);
+                if (gained <= 0 && veinPickupTicks-- > 0 && HarvestCore.nearestDropAnyOf(bot, targetDrops, 6.0D).isPresent()) {
                     return;
                 }
                 collected += gained;
@@ -343,7 +361,7 @@ public final class OreSeekTask extends AbstractTask {
             currentVeinBlock = null;
             return;
         }
-        if (OreScan.adjacentHazard(world, currentVeinBlock)) {
+        if (unsafeToMine(bot, world, currentVeinBlock)) {
             currentVeinBlock = null; // 跳过危险矿块
             return;
         }
@@ -396,7 +414,7 @@ public final class OreSeekTask extends AbstractTask {
             }
             return;
         }
-        if (OreScan.adjacentHazard(world, currentDescendBlock)) {
+        if (unsafeToMine(bot, world, currentDescendBlock)) {
             fail("descend_hazard: " + shortPos(currentDescendBlock));
             return;
         }
@@ -440,6 +458,40 @@ public final class OreSeekTask extends AbstractTask {
     // ───────────── helpers ─────────────
     private static boolean canReach(AIPlayerEntity bot, BlockPos target) {
         return bot.getEyePos().squaredDistanceTo(target.toCenterPos()) <= REACH_SQUARED;
+    }
+
+    private boolean ensureToolGate(AIPlayerEntity bot) {
+        int requiredTier = ToolTier.requiredPickaxeTier(targetOres);
+        int bestTier = ToolTier.bestPickaxeTier(bot);
+        if (bestTier < requiredTier) {
+            String needed = ToolTier.requiredPickaxeItemId(targetOres);
+            BotLog.action(bot, "oreseek_tool_gate",
+                    "result", "fail",
+                    "required", needed,
+                    "best_tier", bestTier);
+            fail("need_better_tool:" + needed);
+            return false;
+        }
+        if (!toolGateChecked) {
+            BotLog.action(bot, "oreseek_tool_gate",
+                    "result", "pass",
+                    "required_tier", requiredTier,
+                    "best_tier", bestTier);
+            toolGateChecked = true;
+        }
+        return true;
+    }
+
+    private static boolean unsafeToMine(AIPlayerEntity bot, ServerWorld world, BlockPos pos) {
+        if (OreScan.adjacentHazard(world, pos)) {
+            return true;
+        }
+        BlockPos feet = bot.getBlockPos();
+        if (!pos.equals(feet.down())) {
+            return false;
+        }
+        BlockPos landing = pos.down();
+        return world.getBlockState(landing).isAir() || OreScan.adjacentHazard(world, landing);
     }
 
     private static BlockPos adjacentStand(AIPlayerEntity bot, BlockPos target) {

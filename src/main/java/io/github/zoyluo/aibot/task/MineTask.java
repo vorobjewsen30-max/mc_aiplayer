@@ -4,9 +4,14 @@ import io.github.zoyluo.aibot.action.HarvestCore;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.mining.OreScan;
+import io.github.zoyluo.aibot.mining.ToolTier;
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
+
+import java.util.Set;
 
 public final class MineTask extends AbstractTask {
     private enum Phase {
@@ -18,6 +23,7 @@ public final class MineTask extends AbstractTask {
 
     private final Block targetBlock;
     private final int countNeeded;
+    private final Set<Item> targetDrops;
     private Phase phase = Phase.SEARCHING;
     private BlockPos targetPos;
     private int countSoFar;
@@ -29,6 +35,7 @@ public final class MineTask extends AbstractTask {
     public MineTask(Block targetBlock, int countNeeded) {
         this.targetBlock = targetBlock;
         this.countNeeded = Math.max(1, countNeeded);
+        this.targetDrops = HarvestCore.expectedDropsFor(targetBlock);
     }
 
     @Override
@@ -112,8 +119,8 @@ public final class MineTask extends AbstractTask {
     }
 
     private void pickup(AIPlayerEntity bot) {
-        HarvestCore.forcePickupNearby(bot, null);
-        int collected = HarvestCore.totalInventoryCount(bot) - inventoryCountBeforeMining;
+        HarvestCore.forcePickupNearbyAnyOf(bot, targetDrops);
+        int collected = HarvestCore.countInventoryItems(bot, targetDrops) - inventoryCountBeforeMining;
         if (collected > 0) {
             BotLog.action(bot, "pickup_collected", "count", collected);
             countSoFar += collected;
@@ -125,15 +132,15 @@ public final class MineTask extends AbstractTask {
             return;
         }
         pickupTicks--;
-        HarvestCore.chaseDrop(bot, null, 8.0D);
+        HarvestCore.chaseDropAnyOf(bot, targetDrops, 8.0D);
         if (pickupTicks <= 0) {
-            if (!pickupSweepAttempted && HarvestCore.nearestDrop(bot, null, 8.0D).isPresent()) {
+            if (!pickupSweepAttempted && HarvestCore.nearestDropAnyOf(bot, targetDrops, 8.0D).isPresent()) {
                 pickupSweepAttempted = true;
-                HarvestCore.sweepPickup(bot, null, 8);
+                HarvestCore.sweepPickupAnyOf(bot, targetDrops, 8);
                 pickupTicks = 60;
                 return;
             }
-            int partial = HarvestCore.totalInventoryCount(bot) - inventoryCountBeforeMining;
+            int partial = HarvestCore.countInventoryItems(bot, targetDrops) - inventoryCountBeforeMining;
             if (partial > 0) {
                 BotLog.action(bot, "pickup_collected", "count", partial, "reason", "partial_pickup");
                 countSoFar += partial;
@@ -145,7 +152,12 @@ public final class MineTask extends AbstractTask {
     }
 
     private void startMiningTarget(AIPlayerEntity bot) {
-        inventoryCountBeforeMining = HarvestCore.totalInventoryCount(bot);
+        BlockState state = bot.getServerWorld().getBlockState(targetPos);
+        if (!ToolTier.canHarvestWithInventory(bot, state)) {
+            fail("need_better_tool:" + ToolTier.requiredPickaxeItemId(targetBlock));
+            return;
+        }
+        inventoryCountBeforeMining = HarvestCore.countInventoryItems(bot, targetDrops);
         pickupSweepAttempted = false;
         HarvestCore.startMining(bot, targetPos);
         phase = Phase.MINING;
