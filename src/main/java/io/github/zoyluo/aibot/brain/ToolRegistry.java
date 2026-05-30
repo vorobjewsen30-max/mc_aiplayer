@@ -268,6 +268,11 @@ public final class ToolRegistry {
                 .property("count", integerSchema("how many ore blocks to mine"))
                 .required("ore")
                 .build(), (bot, args) -> {
+            if (!AIBotConfig.get().goal().autoToolFillEnabled()) {
+                Task task = new OreSeekTask(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1));
+                TaskManager.INSTANCE.assign(bot, task);
+                return ok("assigned: " + task.name());
+            }
             boolean started = GoalExecutor.INSTANCE.submit(bot,
                     new Goal.MineOre(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1)));
             return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
@@ -577,9 +582,27 @@ public final class ToolRegistry {
             String taskType = requiredString(args, "task_type");
             JsonObject params = args.getAsJsonObject("params");
             if ("mine_ore".equals(taskType)) {
+                if (!AIBotConfig.get().goal().autoToolFillEnabled()) {
+                    Task task = new OreSeekTask(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1));
+                    TaskManager.INSTANCE.assign(bot, task);
+                    return ok("assigned: " + task.name());
+                }
                 boolean started = GoalExecutor.INSTANCE.submit(bot,
                         new Goal.MineOre(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1)));
                 return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
+            }
+            if ("mine".equals(taskType)) {
+                Block block = blockWithAlias(params, "block", "block_type");
+                if (OreScan.isOreBlock(block)) {
+                    int count = optionalInt(params, "count", 1);
+                    if (!AIBotConfig.get().goal().autoToolFillEnabled()) {
+                        Task task = new OreSeekTask(OreScan.oreFamily(block), count);
+                        TaskManager.INSTANCE.assign(bot, task);
+                        return ok("assigned: " + task.name());
+                    }
+                    boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(OreScan.oreFamily(block), count));
+                    return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
+                }
             }
             Task task = createTask(bot, taskType, params);
             TaskManager.INSTANCE.assign(bot, task);

@@ -7,6 +7,8 @@ import io.github.zoyluo.aibot.action.HarvestCore;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.coordination.TaskBoard;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.goal.Goal;
+import io.github.zoyluo.aibot.goal.GoalExecutor;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
 import io.github.zoyluo.aibot.persist.BotPersistence;
@@ -72,6 +74,7 @@ public final class AIBotVerifySubcommand {
             "nav_gap",
             "pickup_blocked",
             "mine_to_iron",
+            "mine_iron_from_scratch",
             "nav_descend");
     private static final Map<UUID, VerifyRun> RUNS = new ConcurrentHashMap<>();
 
@@ -164,6 +167,7 @@ public final class AIBotVerifySubcommand {
             case "nav_gap" -> assignNavGap(bot);
             case "pickup_blocked" -> verifyPickupBlocked(bot);
             case "mine_to_iron" -> assignMineToIron(bot);
+            case "mine_iron_from_scratch" -> assignMineIronFromScratch(bot);
             case "nav_descend" -> assignNavDescend(bot);
             default -> Result.fail(feature, "unknown_feature");
         };
@@ -330,6 +334,27 @@ public final class AIBotVerifySubcommand {
                 ignored -> InventoryAction.countItem(bot, Items.RAW_IRON) >= 1);
     }
 
+    private static Result assignMineIronFromScratch(AIPlayerEntity bot) {
+        prepareArea(bot);
+        clearInventory(bot);
+        ServerWorld world = bot.getServerWorld();
+        BlockPos origin = bot.getBlockPos();
+        world.setBlockState(origin.offset(Direction.WEST, 2), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlockState(origin.offset(Direction.WEST, 2).up(), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlockState(origin.offset(Direction.WEST, 2).up(2), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlockState(origin.offset(Direction.WEST, 2).up(3), Blocks.OAK_LOG.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlockState(origin.offset(Direction.EAST, 2), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlockState(origin.offset(Direction.EAST, 3), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlockState(origin.offset(Direction.EAST, 4), Blocks.STONE.getDefaultState(), Block.NOTIFY_ALL);
+        world.setBlockState(origin.offset(Direction.NORTH, 3), Blocks.IRON_ORE.getDefaultState(), Block.NOTIFY_ALL);
+        boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(java.util.Set.of(Blocks.IRON_ORE), 1));
+        if (!started) {
+            return Result.fail("mine_iron_from_scratch", "goal_submit_failed");
+        }
+        return Result.runningGoal("mine_iron_from_scratch", 3600,
+                ignored -> bot.isAlive() && InventoryAction.countItem(bot, Items.RAW_IRON) >= 1);
+    }
+
     private static Result assignNavDescend(AIPlayerEntity bot) {
         prepareArea(bot);
         ServerWorld world = bot.getServerWorld();
@@ -382,17 +407,34 @@ public final class AIBotVerifySubcommand {
         return count;
     }
 
-    private record VerifyRun(ServerCommandSource source, UUID botId, ArrayDeque<String> queue, List<Result> results) {
+    private static final class VerifyRun {
+        private final ServerCommandSource source;
+        private final UUID botId;
+        private final ArrayDeque<String> queue;
+        private final List<Result> results;
+        private ActiveScenario active;
+
         VerifyRun(ServerCommandSource source, UUID botId, List<String> features) {
-            this(source, botId, new ArrayDeque<>(features), new ArrayList<>());
+            this.source = source;
+            this.botId = botId;
+            this.queue = new ArrayDeque<>(features);
+            this.results = new ArrayList<>();
+        }
+
+        private UUID botId() {
+            return botId;
         }
 
         private boolean tick(MinecraftServer server) {
             Optional<AIPlayerEntity> bot = AIPlayerManager.INSTANCE.getByUuid(botId);
             if (bot.isEmpty()) {
-                results.add(Result.fail("run", "bot_removed"));
+                record(Result.fail(active == null ? "run" : active.result().feature(), "bot_removed"));
                 finish();
                 return true;
+            }
+            if (active != null) {
+                pollActive(server, bot.get());
+                return false;
             }
             if (queue.isEmpty()) {
                 finish();
@@ -403,12 +445,50 @@ public final class AIBotVerifySubcommand {
             Result result;
             try {
                 result = startScenario(source, bot.get(), feature);
-                if (result.running()) {
-                    result = poll(bot.get(), result);
-                }
             } catch (RuntimeException | IOException exception) {
                 result = Result.fail(feature, exception.getClass().getSimpleName() + ": " + exception.getMessage());
             }
+            if (result.running()) {
+                active = new ActiveScenario(result, server.getTicks());
+                String message = "[AIBot Verify] " + result.feature() + " RUNNING timeout=" + result.timeoutTicks();
+                source.sendFeedback(() -> Text.literal(message), false);
+                return false;
+            }
+            record(result);
+            return false;
+        }
+
+        private void pollActive(MinecraftServer server, AIPlayerEntity bot) {
+            Result running = active.result();
+            int elapsedTicks = server.getTicks() - active.startedTick();
+            TaskStatus status = TaskManager.INSTANCE.status(bot);
+            if (status.state() == TaskState.COMPLETED) {
+                if (running.assertion().test(status)) {
+                    record(Result.pass(running.feature(), "completed in " + elapsedTicks + " ticks"));
+                } else if (running.allowGoalContinuation() && GoalExecutor.INSTANCE.hasActivePlan(bot)) {
+                    return;
+                } else {
+                    record(Result.fail(running.feature(), "assertion_failed status=" + status.name() + " " + status.description()));
+                }
+                active = null;
+                return;
+            }
+            if (status.state() == TaskState.FAILED) {
+                if (running.allowGoalContinuation() && GoalExecutor.INSTANCE.hasActivePlan(bot)) {
+                    return;
+                }
+                record(Result.fail(running.feature(), status.failureReason().isBlank() ? "task_failed" : status.failureReason()));
+                active = null;
+                return;
+            }
+            if (elapsedTicks >= running.timeoutTicks()) {
+                TaskManager.INSTANCE.abort(bot);
+                record(Result.fail(running.feature(), "verify_timeout status=" + status.name() + " " + status.description()));
+                active = null;
+            }
+        }
+
+        private void record(Result result) {
             results.add(result);
             String message = "[AIBot Verify] "
                     + result.feature()
@@ -417,24 +497,6 @@ public final class AIBotVerifySubcommand {
                     + " - "
                     + result.detail();
             source.sendFeedback(() -> Text.literal(message), false);
-            return false;
-        }
-
-        private Result poll(AIPlayerEntity bot, Result running) {
-            for (int tick = 0; tick < running.timeoutTicks(); tick++) {
-                bot.tick();
-                TaskManager.INSTANCE.tickAll(bot.getServer());
-                TaskStatus status = TaskManager.INSTANCE.status(bot);
-                if (status.state() == TaskState.COMPLETED && running.assertion().test(status)) {
-                    return Result.pass(running.feature(), "completed in " + tick + " ticks");
-                }
-                if (status.state() == TaskState.FAILED) {
-                    return Result.fail(running.feature(), status.failureReason().isBlank() ? "task_failed" : status.failureReason());
-                }
-            }
-            TaskStatus status = TaskManager.INSTANCE.status(bot);
-            TaskManager.INSTANCE.abort(bot);
-            return Result.fail(running.feature(), "verify_timeout status=" + status.name() + " " + status.description());
         }
 
         private void finish() {
@@ -454,6 +516,9 @@ public final class AIBotVerifySubcommand {
             }
             return parts.toString();
         }
+
+        private record ActiveScenario(Result result, int startedTick) {
+        }
     }
 
     private record Result(String feature,
@@ -461,17 +526,22 @@ public final class AIBotVerifySubcommand {
                           String detail,
                           boolean running,
                           int timeoutTicks,
+                          boolean allowGoalContinuation,
                           Predicate<TaskStatus> assertion) {
         private static Result pass(String feature, String detail) {
-            return new Result(feature, true, detail, false, 0, ignored -> true);
+            return new Result(feature, true, detail, false, 0, false, ignored -> true);
         }
 
         private static Result fail(String feature, String detail) {
-            return new Result(feature, false, detail, false, 0, ignored -> false);
+            return new Result(feature, false, detail, false, 0, false, ignored -> false);
         }
 
         private static Result running(String feature, int timeoutTicks, Predicate<TaskStatus> assertion) {
-            return new Result(feature, false, "running", true, timeoutTicks, assertion);
+            return new Result(feature, false, "running", true, timeoutTicks, false, assertion);
+        }
+
+        private static Result runningGoal(String feature, int timeoutTicks, Predicate<TaskStatus> assertion) {
+            return new Result(feature, false, "running", true, timeoutTicks, true, assertion);
         }
     }
 }

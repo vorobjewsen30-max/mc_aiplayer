@@ -1,5 +1,6 @@
 package io.github.zoyluo.aibot.goal;
 
+import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.craft.AcquisitionHints;
 import io.github.zoyluo.aibot.craft.RecipeRegistry;
@@ -43,7 +44,7 @@ public final class GoalPlanner {
     }
 
     public static GoalPlan plan(AIPlayerEntity bot, Goal goal) {
-        Planner planner = new Planner(inventoryCounts(bot), DEFAULT_MAX_DEPTH);
+        Planner planner = new Planner(inventoryCounts(bot), Math.max(1, AIBotConfig.get().goal().maxPlanDepth()));
         planner.ensureGoal(goal, 0, new HashSet<>());
         return new GoalPlan(goal, List.copyOf(planner.steps), List.copyOf(planner.unresolved));
     }

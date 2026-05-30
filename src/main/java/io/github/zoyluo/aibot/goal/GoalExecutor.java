@@ -1,5 +1,6 @@
 package io.github.zoyluo.aibot.goal;
 
+import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.brain.BotReporter;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
@@ -108,7 +109,7 @@ public final class GoalExecutor {
     }
 
     private void handleStepFailure(MinecraftServer server, AIPlayerEntity bot, ActivePlan plan, String reason) {
-        if (plan.replanned) {
+        if (plan.replanned || !AIBotConfig.get().goal().replanOnFailureEnabled()) {
             activePlans.remove(bot.getUuid());
             BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.TASK, bot, "goal_failed", "goal", plan.goal, "reason", reason);
             report(bot, "目标失败:" + (reason == null || reason.isBlank() ? "步骤失败" : reason));

@@ -23,6 +23,7 @@ public record AIBotConfig(
         Combat combat,
         Night night,
         Mining mining,
+        Goal goal,
         Nav nav,
         Pickup pickup
 ) {
@@ -69,7 +70,7 @@ public record AIBotConfig(
     }
 
     public AIBotConfig withDeepSeek(DeepSeek deepseek) {
-        return new AIBotConfig(deepseek, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), nav(), pickup());
+        return new AIBotConfig(deepseek, perception(), brain(), watchdog(), logging(), survival(), combat(), night(), mining(), goal(), nav(), pickup());
     }
 
     private AIBotConfig withDefaults() {
@@ -84,6 +85,7 @@ public record AIBotConfig(
                 combat == null ? defaults.combat : combat.withDefaults(defaults.combat),
                 night == null ? defaults.night : night.withDefaults(defaults.night),
                 mining == null ? defaults.mining : mining.withDefaults(defaults.mining),
+                goal == null ? defaults.goal : goal.withDefaults(defaults.goal),
                 nav == null ? defaults.nav : nav.withDefaults(defaults.nav),
                 pickup == null ? defaults.pickup : pickup.withDefaults(defaults.pickup));
     }
@@ -109,6 +111,7 @@ public record AIBotConfig(
                 new Combat(10, 2),
                 new Night(true, 8),
                 new Mining(2, 0.10D, true),
+                new Goal(12, true, true),
                 new Nav(1.0D, 12, 60, 30, 4, 2, 3.0D, 3),
                 new Pickup(1.5D, 1.0D, 8.0D));
     }
@@ -218,6 +221,23 @@ public record AIBotConfig(
                     positiveOrDefault(returnWhenFreeSlots, defaults.returnWhenFreeSlots),
                     toolDurabilityFloor > 0.0D ? toolDurabilityFloor : defaults.toolDurabilityFloor,
                     placeTorches);
+        }
+    }
+
+    public record Goal(int maxPlanDepth, Boolean replanOnFailure, Boolean autoToolFill) {
+        Goal withDefaults(Goal defaults) {
+            return new Goal(
+                    positiveOrDefault(maxPlanDepth, defaults.maxPlanDepth),
+                    boolOrDefault(replanOnFailure, defaults.replanOnFailure),
+                    boolOrDefault(autoToolFill, defaults.autoToolFill));
+        }
+
+        public boolean replanOnFailureEnabled() {
+            return Boolean.TRUE.equals(replanOnFailure);
+        }
+
+        public boolean autoToolFillEnabled() {
+            return Boolean.TRUE.equals(autoToolFill);
         }
     }
 
