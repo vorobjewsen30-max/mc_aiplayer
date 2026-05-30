@@ -3,6 +3,7 @@ package io.github.zoyluo.aibot.task;
 import io.github.zoyluo.aibot.action.HarvestCore;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.mining.OreScan;
 import net.minecraft.block.Block;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
@@ -66,6 +67,10 @@ public final class MineTask extends AbstractTask {
     private void search(AIPlayerEntity bot) {
         HarvestCore.TargetChoice choice = HarvestCore.nearestReachableBlock(bot, targetBlock, 8, 4, 6);
         if (choice == null) {
+            if (OreScan.isOreBlock(targetBlock)) {
+                fail("no_exposed_ore:use_strip_mine:" + Registries.BLOCK.getId(targetBlock));
+                return;
+            }
             fail("no_reachable_target_block_in_range");
             return;
         }

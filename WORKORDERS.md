@@ -225,7 +225,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
     (c) 次要:排查为何 bot 会停在 y=105 树冠(疑似持久化(RL-7)恢复到上次卡树的位置,或 forage 砍树后遗留站位)——恢复/出生时校正到脚下实地。
   - **验收**:把 bot 放树顶/半空再派 move/采集 → 自动落到地面并正常寻路,不再 `GOAL_NOT_STANDABLE`/`NO_START` 死循环。
 
-- [ ] **FIX-4(P1)** 失败原因可执行 + RL-1 换策略引导(防原地重试同一招)
+- [x] **FIX-4(P1)** 失败原因可执行 + RL-1 换策略引导(防原地重试同一招) ✅ done: `MineTask` 矿石无暴露目标返回 `no_exposed_ore:use_strip_mine`,失败 streak 与待注入分离,连续同因失败会强制提示换策略; compileJava/compileClientJava 通过。
   - **现象**:`no_block_found` 后 LLM 重试**同一个** `mine iron_ore` 共 4 次(count 1→4)才放弃。
   - **改**:(a) MineTask 目标是 `*_ore` 且扫不到 → reason 带建议,如 `no_exposed_ore:use_strip_mine`;(b) RL-1 同(任务+原因)重复 ≥2 次时,注入消息**明确要求换方法**(别再 `mine` 同一矿,改 `strip_mine`/下挖)。
   - **验收**:地表挖矿失败一次后,LLM 即改用 `strip_mine`,不再重复 `mine` 同一矿石。

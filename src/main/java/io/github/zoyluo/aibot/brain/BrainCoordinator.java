@@ -310,6 +310,10 @@ public final class BrainCoordinator {
                     String retryHint = failure.count() >= maxRetries
                             ? " 已经连续多次同样失败,请倾向于换方法或用 say 说明无法完成。"
                             : "";
+                    String strategyHint = failure.count() >= 2
+                            ? " 同一任务和原因已经连续失败,禁止原样重试;必须换工具/任务策略,或先补齐前置条件。"
+                            : "";
+                    String executableHint = executableFailureHint(failure);
                     PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
                     conversation.lastPerceptionDigest = perceptionDigest(snapshot);
                     conversation.history.add(ChatMessage.user("上一个任务失败:"
@@ -320,6 +324,8 @@ public final class BrainCoordinator {
                             + failure.count()
                             + "次)。请判断:补齐前置条件后重试 / 换用其它方法 / 用 say 说明无法完成。"
                             + retryHint
+                            + strategyHint
+                            + executableHint
                             + "\n\nCurrent state:\n"
                             + snapshot.toJson()));
                     BotLog.comm(bot, "failure_injected",
@@ -330,6 +336,14 @@ public final class BrainCoordinator {
                     return true;
                 })
                 .orElse(false);
+    }
+
+    private static String executableFailureHint(TaskManager.FailureRecord failure) {
+        String reason = failure.reason() == null ? "" : failure.reason();
+        if (reason.startsWith("no_exposed_ore:use_strip_mine")) {
+            return " 可执行建议:目标是矿石但附近没有暴露矿块,不要再用 mine;改用 strip_mine/assign_task strip_mine 并设置 target_ores 为目标矿石。";
+        }
+        return "";
     }
 
     private boolean maybeInjectGoalContinuation(AIPlayerEntity bot, BotConversation conversation, String reason) {

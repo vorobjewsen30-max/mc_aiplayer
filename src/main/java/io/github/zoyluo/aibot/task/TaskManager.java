@@ -21,6 +21,7 @@ public final class TaskManager {
     private final Map<UUID, Task> paused = new ConcurrentHashMap<>();
     private final Map<UUID, TaskStatus> lastStatus = new ConcurrentHashMap<>();
     private final Map<UUID, FailureRecord> lastFailure = new ConcurrentHashMap<>();
+    private final Map<UUID, FailureRecord> pendingFailure = new ConcurrentHashMap<>();
 
     private TaskManager() {
     }
@@ -121,6 +122,7 @@ public final class TaskManager {
             if (task.state() == TaskState.COMPLETED) {
                 active.remove(uuid);
                 lastFailure.remove(uuid);
+                pendingFailure.remove(uuid);
                 BotLog.task(player, "task_completed", "name", task.name(), "elapsed_ticks", task.elapsedTicks());
             } else if (task.state() == TaskState.FAILED) {
                 active.remove(uuid);
@@ -137,15 +139,17 @@ public final class TaskManager {
         int count = previous != null && previous.name().equals(name) && previous.reason().equals(reason)
                 ? previous.count() + 1
                 : 1;
-        lastFailure.put(uuid, new FailureRecord(name, reason, count, tick));
+        FailureRecord record = new FailureRecord(name, reason, count, tick);
+        lastFailure.put(uuid, record);
+        pendingFailure.put(uuid, record);
     }
 
     public Optional<FailureRecord> peekFailure(AIPlayerEntity bot) {
-        return Optional.ofNullable(lastFailure.get(bot.getUuid()));
+        return Optional.ofNullable(pendingFailure.get(bot.getUuid()));
     }
 
     public Optional<FailureRecord> consumeFailure(AIPlayerEntity bot) {
-        return Optional.ofNullable(lastFailure.remove(bot.getUuid()));
+        return Optional.ofNullable(pendingFailure.remove(bot.getUuid()));
     }
 
     public void onServerStopping(MinecraftServer server) {
@@ -155,6 +159,7 @@ public final class TaskManager {
         active.clear();
         paused.clear();
         lastFailure.clear();
+        pendingFailure.clear();
         BotLog.task(null, "tasks_cleared");
     }
 
@@ -163,6 +168,7 @@ public final class TaskManager {
         paused.remove(bot.getUuid());
         lastStatus.remove(bot.getUuid());
         lastFailure.remove(bot.getUuid());
+        pendingFailure.remove(bot.getUuid());
         BotReporter.INSTANCE.onCleared(bot);
     }
 
