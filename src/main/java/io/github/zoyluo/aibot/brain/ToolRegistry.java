@@ -18,6 +18,7 @@ import io.github.zoyluo.aibot.craft.CraftingHelper;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.memory.BotMemory;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
+import io.github.zoyluo.aibot.mining.OreScan;
 import io.github.zoyluo.aibot.task.BlueprintLoader;
 import io.github.zoyluo.aibot.task.BreedTask;
 import io.github.zoyluo.aibot.task.BuildTask;
@@ -232,7 +233,7 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("strip_mine", "Mine a 2-high branch tunnel in a direction. It checks water/lava/drop hazards before breaking blocks, follows ore veins, places torches, and can return to a depot chest when nearly full.", objectSchema()
+        register("strip_mine", "Mine a 2-high branch tunnel in a direction. Use this for ore blocks such as minecraft:iron_ore, not assign_task mine. If started above the target ore layer and no exposed ore is nearby, it first digs a descending stair shaft to the ore layer, then branches, follows veins, places torches, and can return to a depot chest when nearly full.", objectSchema()
                 .property("direction", stringSchema("north, south, east, or west"))
                 .property("length", integerSchema("main tunnel length"))
                 .property("spacing", integerSchema("branch spacing and branch depth"))
@@ -544,7 +545,7 @@ public final class ToolRegistry {
         register("goal_status", "Get the current persistent long-term goal status", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) ->
                 ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus("")));
 
-        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, gathering, foraging, mining, combat, building, sleep, lighting, farming, fishing, trading, breeding, and container work. Use dedicated craft, eat, and smelt tools for those actions. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
+        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, gathering, foraging, mining, combat, building, sleep, lighting, farming, fishing, trading, breeding, and container work. Use dedicated craft, eat, and smelt tools for those actions. For exposed surface blocks use task_type=mine; for ore blocks matching *_ore use task_type=strip_mine with target_ores, because mine only scans nearby exposed blocks. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
                 .property("task_type", stringSchema("move, gather, forage, attack, mine, strip_mine, mine_vein, build, sleep, light_area, farm, harvest, fish, trade, breed, follow, hold, guard, deposit, stockpile, or withdraw"))
                 .property("params", objectSchema().build())
                 .required("task_type")
@@ -584,7 +585,8 @@ public final class ToolRegistry {
                     io.github.zoyluo.aibot.AIBotConfig.get().combat().retreatHp());
             case "mine" -> {
                 Block block = blockWithAlias(params, "block", "block_type");
-                yield new MineTask(block, optionalInt(params, "count", 1));
+                int count = optionalInt(params, "count", 1);
+                yield OreScan.isOreBlock(block) ? StripMineTask.forOre(block, count) : new MineTask(block, count);
             }
             case "gather" -> new GatherQuotaTask(requiredItem(params, "item"), optionalInt(params, "count", 1));
             case "fish" -> new FishTask(optionalInt(params, "max_catches", 1), optionalInt(params, "max_ticks", 6000));

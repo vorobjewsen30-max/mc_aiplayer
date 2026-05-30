@@ -48,6 +48,7 @@ public final class StripMineTask extends AbstractTask {
 
     private enum StepKind {
         TUNNEL,
+        DESCEND,
         MOVE_ONLY
     }
 
@@ -60,6 +61,7 @@ public final class StripMineTask extends AbstractTask {
     private final BlockPos depotChest;
     private final Set<Block> targetOres;
     private final boolean veinOnly;
+    private final boolean autoDescend;
     private final Deque<Step> steps = new ArrayDeque<>();
     private final Deque<BlockPos> blocksToMine = new ArrayDeque<>();
     private final Deque<BlockPos> veinBlocks = new ArrayDeque<>();
@@ -76,6 +78,7 @@ public final class StripMineTask extends AbstractTask {
     private int tunnelBlocksMined;
     private int veinBlocksMined;
     private int distanceCompleted;
+    private int descentStepsPlanned;
     private String note = "";
 
     public StripMineTask(Direction direction, int length, int branchSpacing, BlockPos depotChest, Set<Block> targetOres) {
@@ -86,18 +89,35 @@ public final class StripMineTask extends AbstractTask {
         return new StripMineTask(Direction.NORTH, 0, 0, null, targetOres, true);
     }
 
+    public static StripMineTask forOre(Block targetOre, int count) {
+        int length = Math.min(128, Math.max(64, count * 16));
+        return new StripMineTask(Direction.NORTH, length, 4, null, OreScan.oreFamily(targetOre), false, true);
+    }
+
     private StripMineTask(Direction direction,
                           int length,
                           int branchSpacing,
                           BlockPos depotChest,
                           Set<Block> targetOres,
                           boolean veinOnly) {
+        this(direction, length, branchSpacing, depotChest, targetOres, veinOnly,
+                !veinOnly && targetOres != null && !targetOres.isEmpty());
+    }
+
+    private StripMineTask(Direction direction,
+                          int length,
+                          int branchSpacing,
+                          BlockPos depotChest,
+                          Set<Block> targetOres,
+                          boolean veinOnly,
+                          boolean autoDescend) {
         this.direction = direction.getHorizontal() == -1 ? Direction.NORTH : direction;
         this.length = Math.max(0, length);
         this.branchSpacing = Math.max(0, branchSpacing);
         this.depotChest = depotChest == null ? null : depotChest.toImmutable();
-        this.targetOres = targetOres == null || targetOres.isEmpty() ? OreScan.COMMON_ORES : Set.copyOf(targetOres);
+        this.targetOres = targetOres == null || targetOres.isEmpty() ? OreScan.COMMON_ORES : OreScan.expandOreFamilies(targetOres);
         this.veinOnly = veinOnly;
+        this.autoDescend = autoDescend;
     }
 
     @Override
@@ -146,11 +166,12 @@ public final class StripMineTask extends AbstractTask {
         currentVeinBlock = null;
         miningStarted = false;
         returningForFinalStop = false;
+        descentStepsPlanned = 0;
     }
 
     @Override
     protected void onTick(AIPlayerEntity bot) {
-        if (elapsed > Math.max(2400, (length + branchSpacing * Math.max(1, length / Math.max(1, branchSpacing))) * 400)) {
+        if (elapsed > Math.max(2400, (descentStepsPlanned + length + branchSpacing * Math.max(1, length / Math.max(1, branchSpacing))) * 400)) {
             fail("strip_mine_timeout");
             return;
         }
@@ -179,23 +200,68 @@ public final class StripMineTask extends AbstractTask {
             phase = Phase.MINE_VEIN;
             return;
         }
-        buildPlan();
+        buildPlan(bot);
         phase = Phase.TUNNEL;
     }
 
-    private void buildPlan() {
+    private void buildPlan(AIPlayerEntity bot) {
         steps.clear();
+        descentStepsPlanned = 0;
+        BlockPos miningOrigin = origin;
+        if (shouldDescendToOreLayer(bot)) {
+            int targetY = Math.max(bot.getServerWorld().getBottomY() + 6, OreScan.preferredMiningY(targetOres));
+            descentStepsPlanned = Math.max(0, origin.getY() - targetY);
+            for (int step = 1; step <= descentStepsPlanned; step++) {
+                miningOrigin = origin.offset(direction, step).down(step).toImmutable();
+                steps.addLast(new Step(miningOrigin, StepKind.DESCEND, 0));
+            }
+            note = "descending_to_y:" + targetY;
+        }
         Direction left = direction.rotateYCounterclockwise();
         Direction right = direction.rotateYClockwise();
         int branchDepth = branchSpacing <= 0 ? 0 : Math.min(branchSpacing, 8);
         for (int distance = 1; distance <= length; distance++) {
-            BlockPos main = origin.offset(direction, distance);
+            BlockPos main = miningOrigin.offset(direction, distance);
             steps.addLast(new Step(main, StepKind.TUNNEL, distance));
             if (branchDepth > 0 && distance % branchSpacing == 0) {
                 addBranch(main, left, branchDepth);
                 addBranch(main, right, branchDepth);
             }
         }
+    }
+
+    private boolean shouldDescendToOreLayer(AIPlayerEntity bot) {
+        if (!autoDescend || veinOnly || targetOres.stream().noneMatch(OreScan::isOreBlock)) {
+            return false;
+        }
+        int targetY = Math.max(bot.getServerWorld().getBottomY() + 6, OreScan.preferredMiningY(targetOres));
+        if (origin.getY() <= targetY + 2) {
+            return false;
+        }
+        return !hasExposedOreNearby(bot, origin, 12, 8);
+    }
+
+    private boolean hasExposedOreNearby(AIPlayerEntity bot, BlockPos center, int horizontalRadius, int verticalRadius) {
+        BlockPos min = center.add(-horizontalRadius, -verticalRadius, -horizontalRadius);
+        BlockPos max = center.add(horizontalRadius, verticalRadius, horizontalRadius);
+        for (BlockPos pos : BlockPos.iterate(min, max)) {
+            if (Math.abs(pos.getY() - center.getY()) > 3) {
+                continue;
+            }
+            if (OreScan.isOre(bot.getServerWorld().getBlockState(pos), targetOres) && isExposed(bot.getServerWorld(), pos)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isExposed(ServerWorld world, BlockPos pos) {
+        for (Direction direction : Direction.values()) {
+            if (world.getBlockState(pos.offset(direction)).isAir()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void addBranch(BlockPos base, Direction side, int depth) {
@@ -231,6 +297,9 @@ public final class StripMineTask extends AbstractTask {
         blocksToMine.clear();
         addIfSolid(bot.getServerWorld(), currentStep.stand());
         addIfSolid(bot.getServerWorld(), currentStep.stand().up());
+        if (currentStep.kind() == StepKind.DESCEND) {
+            addIfSolid(bot.getServerWorld(), currentStep.stand().up(2));
+        }
         if (blocksToMine.isEmpty()) {
             phase = Phase.SCAN_VEIN;
         } else {
@@ -373,6 +442,13 @@ public final class StripMineTask extends AbstractTask {
         if (currentStep == null || near(bot, currentStep.stand())) {
             bot.getActionPack().stopAll();
             phase = Phase.TUNNEL;
+            return;
+        }
+        if ((currentStep.kind() == StepKind.TUNNEL || currentStep.kind() == StepKind.DESCEND)
+                && currentStep.stand().getManhattanDistance(bot.getBlockPos()) <= 4) {
+            if (bot.getActionPack().isWalkToIdle()) {
+                bot.getActionPack().startWalkTo(currentStep.stand().toCenterPos());
+            }
             return;
         }
         if (bot.getActionPack().isPathExecutorIdle()) {

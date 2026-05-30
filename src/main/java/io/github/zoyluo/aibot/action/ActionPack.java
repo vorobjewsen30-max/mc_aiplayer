@@ -188,6 +188,10 @@ public final class ActionPack {
         return pathExecutor == null;
     }
 
+    public boolean isWalkToIdle() {
+        return walkTo == null;
+    }
+
     public boolean isMiningIdle() {
         return mining == null;
     }

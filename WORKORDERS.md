@@ -208,7 +208,7 @@ Minecraft 1.21.3、Fabric Loader 0.18.4、Yarn 1.21.3+build.2、fabric-loom 1.16
 
 ## 修复工单池(运行期发现 → 登记于此 → 交 Codex 修)
 - [ ] **FIX-1** `TradeTask.afterUsing` 现走反射(`afterUsing`/`method_18008`):若 1.21.3 该方法可直接调用则改直调,保留反射兜底。(静态审查发现,低优)
-- [ ] **FIX-2(核心,P0)** 矿物采集走"下挖到矿层"策略,而非 naive MineTask
+- [x] **FIX-2(核心,P0)** 矿物采集走"下挖到矿层"策略,而非 naive MineTask ✅ done: `mine *_ore` 路由到 `StripMineTask`,自动下井清三格楼梯空间,compileJava/compileClientJava 通过;短验收拿到 raw_iron。
   - **现象**:地表(y=105)`帮我挖一些铁矿` → `assign_task mine iron_ore` 连续 `no_block_found:minecraft:iron_ore` 秒失败、反复重试无效。
   - **根因**:`MineTask` 只在局部体积(水平 12→48、**垂直仅 ±6 `VERTICAL_SPAN`**)扫**已暴露**方块;地下矿石扫不到,且它**不会下挖**。
   - **改**:

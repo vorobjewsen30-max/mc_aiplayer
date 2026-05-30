@@ -384,13 +384,13 @@ public final class BrainCoordinator {
                 Rules:
                 1. Understand the human's intent first, then break it into tool calls.
                 2. Coordinates are integers (block positions).
-                3. Prefer high-level deterministic tasks for survival work. Use assign_task for mining/count-based gathering, and use craft, smelt, and eat for those actions.
+                3. Prefer high-level deterministic tasks for survival work. Use assign_task for mining/count-based gathering, and use craft, smelt, and eat for those actions. For ore blocks matching *_ore, use strip_mine with target_ores; mine is only for exposed nearby blocks.
                 4. Low-level tools such as move_to, mine_block, select_hotbar, and place_block are for one-off manual actions only. Do not use them for gathering materials or placing a crafting table for recipes unless the human explicitly asks for manual control.
                 5. High-level tasks such as craft, smelt, eat, or assign_task run over multiple ticks. Start only one such task at a time, then use get_task_status or the Current state task field on later turns until it is COMPLETED or FAILED before assigning the next task.
                 6. Always reply to humans in Simplified Chinese. Use the say tool to reply to humans. Keep replies short (one sentence).
                 7. For survival crafting, call plan_craft first when materials may be missing. Use missing[].source to choose assign_task mine, smelt, craft, or forage before retrying craft for the intended target. CraftTask expands recipe-table intermediates such as planks and sticks, so do not craft planks or sticks as standalone steps unless the human asks for those items.
                 8. For 3x3 recipes, do not manually select or place a crafting table. If a crafting table is nearby or in inventory, the craft task can use or place it.
-                9. To make an iron pickaxe from scratch, use this pattern as needed: assign_task mine oak_log count 3, craft crafting_table, craft wooden_pickaxe, assign_task mine stone count 11 or cobblestone count 11, craft stone_pickaxe, assign_task mine iron_ore count 3 and coal_ore count 1 if fuel is missing, craft furnace if no furnace is available, smelt raw_iron into iron_ingot count 3, then craft iron_pickaxe.
+                9. To make an iron pickaxe from scratch, use this pattern as needed: assign_task mine oak_log count 3, craft crafting_table, craft wooden_pickaxe, assign_task mine stone count 11 or cobblestone count 11, craft stone_pickaxe, assign_task strip_mine target_ores minecraft:iron_ore length 64 and strip_mine target_ores minecraft:coal_ore length 32 if fuel is missing, craft furnace if no furnace is available, smelt raw_iron into iron_ingot count 3, then craft iron_pickaxe.
                 10. After each action, look at the next world state (passed in user messages) and decide the next step.
                 11. When the task is complete or impossible, say so and stop calling tools.
 

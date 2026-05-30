@@ -8,6 +8,7 @@ import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
+import io.github.zoyluo.aibot.mining.OreScan;
 import io.github.zoyluo.aibot.task.BlueprintLoader;
 import io.github.zoyluo.aibot.action.FarmAction;
 import io.github.zoyluo.aibot.task.BreedTask;
@@ -228,7 +229,7 @@ public final class AIBotTaskSubcommand {
     private static int assignMine(CommandContext<ServerCommandSource> context, int count) {
         return assign(context, bot -> {
             Block block = Registries.BLOCK.get(IdentifierArgumentType.getIdentifier(context, "block"));
-            return new MineTask(block, count);
+            return OreScan.isOreBlock(block) ? StripMineTask.forOre(block, count) : new MineTask(block, count);
         });
     }
 
