@@ -44,6 +44,7 @@ public final class FishTask extends AbstractTask {
     private int phaseTicks;
     private int catches;
     private int inventoryBeforeReel;
+    private boolean collectSweepAttempted;
 
     public FishTask(int maxCatches, int maxTicks) {
         this.maxCatches = Math.max(1, maxCatches);
@@ -190,6 +191,7 @@ public final class FishTask extends AbstractTask {
         }
         currentHook(bot).ifPresent(hook -> LookAction.lookAt(bot, hook.getPos()));
         inventoryBeforeReel = HarvestCore.totalInventoryCount(bot);
+        collectSweepAttempted = false;
         ActionResult result = InteractAction.useItemInAir(bot, Hand.MAIN_HAND);
         if (result.isFailed()) {
             fail("reel_failed:" + result.reason());
@@ -200,12 +202,18 @@ public final class FishTask extends AbstractTask {
 
     private void collect(AIPlayerEntity bot) {
         phaseTicks++;
+        HarvestCore.forcePickupNearby(bot, null, 1.5D, 1.0D);
         HarvestCore.chaseDrop(bot, null, 8.0D);
         if (phaseTicks < COLLECT_TICKS) {
             return;
         }
         if (HarvestCore.totalInventoryCount(bot) > inventoryBeforeReel) {
             catches++;
+        } else if (!collectSweepAttempted && HarvestCore.nearestDrop(bot, null, 8.0D).isPresent()) {
+            collectSweepAttempted = true;
+            HarvestCore.sweepPickup(bot, null, 8.0D, 8);
+            phaseTicks = 0;
+            return;
         }
         if (catches >= maxCatches) {
             bot.getActionPack().stopAll();

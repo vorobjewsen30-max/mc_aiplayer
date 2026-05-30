@@ -31,6 +31,7 @@ public final class GatherQuotaTask extends AbstractTask {
     private int countSoFar;
     private int countBeforeHarvest;
     private int pickupTicks;
+    private boolean pickupSweepAttempted;
     private StockpileTask stockpileTask;
 
     public GatherQuotaTask(Item targetItem, int targetCount) {
@@ -131,6 +132,7 @@ public final class GatherQuotaTask extends AbstractTask {
     }
 
     private void pickup(AIPlayerEntity bot) {
+        HarvestCore.forcePickupNearby(bot, targetItem, 1.5D, 1.0D);
         countSoFar = InventoryAction.countItem(bot, targetItem);
         if (countSoFar > countBeforeHarvest) {
             phase = countSoFar >= targetCount ? Phase.DONE : Phase.SURVEY;
@@ -139,6 +141,12 @@ public final class GatherQuotaTask extends AbstractTask {
         pickupTicks--;
         HarvestCore.chaseDrop(bot, targetItem, 8.0D);
         if (pickupTicks <= 0) {
+            if (!pickupSweepAttempted && HarvestCore.nearestDrop(bot, targetItem, 8.0D).isPresent()) {
+                pickupSweepAttempted = true;
+                HarvestCore.sweepPickup(bot, targetItem, 8.0D, 8);
+                pickupTicks = 60;
+                return;
+            }
             countSoFar = InventoryAction.countItem(bot, targetItem);
             if (countSoFar > countBeforeHarvest) {
                 phase = countSoFar >= targetCount ? Phase.DONE : Phase.SURVEY;
@@ -169,6 +177,7 @@ public final class GatherQuotaTask extends AbstractTask {
 
     private void startHarvest(AIPlayerEntity bot) {
         countBeforeHarvest = InventoryAction.countItem(bot, targetItem);
+        pickupSweepAttempted = false;
         HarvestCore.startMining(bot, targetPos);
         phase = Phase.HARVEST;
     }

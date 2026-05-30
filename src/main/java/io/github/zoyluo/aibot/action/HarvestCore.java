@@ -1,15 +1,18 @@
 package io.github.zoyluo.aibot.action;
 
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.pathfinding.Standability;
 import net.minecraft.block.Block;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 
 public final class HarvestCore {
@@ -40,12 +43,74 @@ public final class HarvestCore {
                 .min(Comparator.comparingDouble(entity -> entity.distanceTo(bot)));
     }
 
+    public static boolean forcePickupNearby(AIPlayerEntity bot, Item item, double maxH, double maxV) {
+        Box box = bot.getBoundingBox().expand(maxH, maxV, maxH);
+        List<ItemEntity> drops = bot.getServerWorld().getEntitiesByClass(ItemEntity.class, box,
+                entity -> !entity.getStack().isEmpty()
+                        && (item == null || entity.getStack().isOf(item))
+                        && canForcePickup(bot, entity, maxH, maxV));
+        boolean picked = false;
+        for (ItemEntity drop : drops) {
+            ItemStack remaining = drop.getStack().copy();
+            int before = remaining.getCount();
+            ActionResult result = InventoryAction.giveItem(bot, remaining);
+            int inserted = before - remaining.getCount();
+            if (inserted <= 0) {
+                continue;
+            }
+            picked = true;
+            BotLog.action(bot, "pickup_forced",
+                    "item", drop.getStack().getItem(),
+                    "count", inserted,
+                    "result", result.isSuccess() ? "all" : result.reason());
+            if (remaining.isEmpty()) {
+                drop.discard();
+            } else {
+                drop.setStack(remaining);
+            }
+        }
+        return picked;
+    }
+
     public static void chaseDrop(AIPlayerEntity bot, Item item, double radius) {
+        if (forcePickupNearby(bot, item, 1.5D, 1.0D)) {
+            bot.getActionPack().stopMovement();
+            return;
+        }
         nearestDrop(bot, item, radius).ifPresent(drop -> {
-            if (bot.distanceTo(drop) > 1.5F && bot.getActionPack().isPathExecutorIdle()) {
-                bot.getActionPack().startPathTo(pickupStandPos(bot, drop.getBlockPos()));
+            if (bot.distanceTo(drop) > 1.3F) {
+                if (bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
+                    ActionResult result = bot.getActionPack().startPathTo(pickupStandPos(bot, drop.getBlockPos()));
+                    if (result.isFailed()) {
+                        bot.getActionPack().startWalkTo(drop.getPos());
+                    }
+                }
+            } else {
+                bot.getActionPack().stopMovement();
             }
         });
+    }
+
+    public static int sweepPickup(AIPlayerEntity bot, Item item, double radius, int maxTargets) {
+        int picked = 0;
+        for (int i = 0; i < maxTargets; i++) {
+            if (!forcePickupNearby(bot, item, 1.5D, 1.0D)) {
+                break;
+            }
+            picked++;
+        }
+        if (picked > 0) {
+            return picked;
+        }
+        nearestDrop(bot, item, radius).ifPresent(drop -> {
+            if (bot.getActionPack().isPathExecutorIdle() && bot.getActionPack().isWalkToIdle()) {
+                ActionResult result = bot.getActionPack().startPathTo(pickupStandPos(bot, drop.getBlockPos()));
+                if (result.isFailed()) {
+                    bot.getActionPack().startWalkTo(drop.getPos());
+                }
+            }
+        });
+        return 0;
     }
 
     public static int totalInventoryCount(AIPlayerEntity bot) {
@@ -100,13 +165,12 @@ public final class HarvestCore {
     }
 
     public static boolean canDirectMine(AIPlayerEntity bot, BlockPos target) {
-        return target.getY() >= bot.getBlockY() && canReach(bot, target);
+        // 允许挖脚下/低处方块(够得着即可)——地表往下挖石头的核心。
+        return canReach(bot, target);
     }
 
     public static TargetChoice targetChoice(AIPlayerEntity bot, BlockPos target) {
-        if (target.getY() < bot.getBlockY()) {
-            return null;
-        }
+        // 不再因方块低于自己而拒绝:够得着就直接挖(挖脚下→下落→继续往下挖,掉落物随之落到脚边便于拾取)。
         if (canDirectMine(bot, target)) {
             return new TargetChoice(target, null, true);
         }
@@ -125,6 +189,15 @@ public final class HarvestCore {
             }
         }
         return null;
+    }
+
+    private static boolean canForcePickup(AIPlayerEntity bot, ItemEntity drop, double maxH, double maxV) {
+        if (drop.cannotPickup()) {
+            return false;
+        }
+        double dx = drop.getX() - bot.getX();
+        double dz = drop.getZ() - bot.getZ();
+        return dx * dx + dz * dz <= maxH * maxH && Math.abs(drop.getY() - bot.getY()) <= maxV;
     }
 
     public record TargetChoice(BlockPos pos, BlockPos stand, boolean direct) {

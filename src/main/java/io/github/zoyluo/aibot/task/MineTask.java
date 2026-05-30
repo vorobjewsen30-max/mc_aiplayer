@@ -23,6 +23,7 @@ public final class MineTask extends AbstractTask {
     private int countSoFar;
     private int inventoryCountBeforeMining;
     private int pickupTicks;
+    private boolean pickupSweepAttempted;
     private boolean directMiningTarget;
 
     public MineTask(Block targetBlock, int countNeeded) {
@@ -111,6 +112,7 @@ public final class MineTask extends AbstractTask {
     }
 
     private void pickup(AIPlayerEntity bot) {
+        HarvestCore.forcePickupNearby(bot, null, 1.5D, 1.0D);
         int collected = HarvestCore.totalInventoryCount(bot) - inventoryCountBeforeMining;
         if (collected > 0) {
             BotLog.action(bot, "pickup_collected", "count", collected);
@@ -125,6 +127,12 @@ public final class MineTask extends AbstractTask {
         pickupTicks--;
         HarvestCore.chaseDrop(bot, null, 8.0D);
         if (pickupTicks <= 0) {
+            if (!pickupSweepAttempted && HarvestCore.nearestDrop(bot, null, 8.0D).isPresent()) {
+                pickupSweepAttempted = true;
+                HarvestCore.sweepPickup(bot, null, 8.0D, 8);
+                pickupTicks = 60;
+                return;
+            }
             int partial = HarvestCore.totalInventoryCount(bot) - inventoryCountBeforeMining;
             if (partial > 0) {
                 BotLog.action(bot, "pickup_collected", "count", partial, "reason", "partial_pickup");
@@ -138,6 +146,7 @@ public final class MineTask extends AbstractTask {
 
     private void startMiningTarget(AIPlayerEntity bot) {
         inventoryCountBeforeMining = HarvestCore.totalInventoryCount(bot);
+        pickupSweepAttempted = false;
         HarvestCore.startMining(bot, targetPos);
         phase = Phase.MINING;
     }
