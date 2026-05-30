@@ -4,6 +4,7 @@ import io.github.zoyluo.aibot.action.ActionResult;
 import io.github.zoyluo.aibot.action.InventoryAction;
 import io.github.zoyluo.aibot.action.LookAction;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.mixin.MerchantEntityInvokerMixin;
 import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
@@ -194,6 +195,12 @@ public final class TradeTask extends AbstractTask {
     }
 
     private boolean afterUsing(VillagerEntity villager, TradeOffer offer) {
+        try {
+            ((MerchantEntityInvokerMixin) villager).aibot$invokeAfterUsing(offer);
+            return true;
+        } catch (LinkageError | RuntimeException ignored) {
+            // Keep the reflection path as a runtime fallback for loader or mapping edge cases.
+        }
         for (String methodName : new String[]{"afterUsing", "method_18008"}) {
             Class<?> type = villager.getClass();
             while (type != null) {

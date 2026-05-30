@@ -6,7 +6,8 @@
   "mixins": [
     "ServerTickProbeMixin",
     "ClientConnectionAccessorMixin",
-    "PlayerManagerFakePlayerMixin"
+    "PlayerManagerFakePlayerMixin",
+    "MerchantEntityInvokerMixin"
   ],
   "client": [],
   "server": [],
