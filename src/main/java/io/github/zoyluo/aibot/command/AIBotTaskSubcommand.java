@@ -26,6 +26,7 @@ import io.github.zoyluo.aibot.task.MoveTask;
 import io.github.zoyluo.aibot.task.SleepTask;
 import io.github.zoyluo.aibot.task.SmeltTask;
 import io.github.zoyluo.aibot.task.StockpileTask;
+import io.github.zoyluo.aibot.task.OreSeekTask;
 import io.github.zoyluo.aibot.task.StripMineTask;
 import io.github.zoyluo.aibot.task.Task;
 import io.github.zoyluo.aibot.task.TaskManager;
@@ -229,7 +230,7 @@ public final class AIBotTaskSubcommand {
     private static int assignMine(CommandContext<ServerCommandSource> context, int count) {
         return assign(context, bot -> {
             Block block = Registries.BLOCK.get(IdentifierArgumentType.getIdentifier(context, "block"));
-            return OreScan.isOreBlock(block) ? StripMineTask.forOre(block, count) : new MineTask(block, count);
+            return OreScan.isOreBlock(block) ? new OreSeekTask(OreScan.oreFamily(block), count) : new MineTask(block, count);
         });
     }
 
@@ -400,6 +401,7 @@ public final class AIBotTaskSubcommand {
             case "south", "s" -> Direction.SOUTH;
             case "east", "e" -> Direction.EAST;
             case "west", "w" -> Direction.WEST;
+            case "down", "d", "up", "u" -> Direction.DOWN;
             default -> throw new IllegalArgumentException("unknown_direction: " + value);
         };
     }

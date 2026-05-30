@@ -39,6 +39,7 @@ import io.github.zoyluo.aibot.task.MoveTask;
 import io.github.zoyluo.aibot.task.SleepTask;
 import io.github.zoyluo.aibot.task.SmeltTask;
 import io.github.zoyluo.aibot.task.StockpileTask;
+import io.github.zoyluo.aibot.task.OreSeekTask;
 import io.github.zoyluo.aibot.task.StripMineTask;
 import io.github.zoyluo.aibot.task.Task;
 import io.github.zoyluo.aibot.task.TaskManager;
@@ -256,6 +257,16 @@ public final class ToolRegistry {
                 .property("target_ores", stringSchema("optional comma separated ore block ids; default is common ores"))
                 .build(), (bot, args) -> {
             Task task = StripMineTask.mineNearbyVein(optionalBlocksCsv(args, "target_ores"));
+            TaskManager.INSTANCE.assign(bot, task);
+            return ok("assigned: " + task.name());
+        });
+
+        register("mine_ore", "PREFERRED way to obtain ores (e.g. minecraft:iron_ore or raw item minecraft:raw_iron). Bot locates the nearest matching ore using full world data, digs a direct tunnel to it, mines the whole vein, then finds the next; it only digs a descending staircase to a deeper layer when no ore is nearby. Use this instead of strip_mine.", objectSchema()
+                .property("ore", stringSchema("ore block id or raw item, e.g. minecraft:iron_ore or minecraft:raw_iron"))
+                .property("count", integerSchema("how many ore blocks to mine"))
+                .required("ore")
+                .build(), (bot, args) -> {
+            Task task = new OreSeekTask(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1));
             TaskManager.INSTANCE.assign(bot, task);
             return ok("assigned: " + task.name());
         });
@@ -545,7 +556,7 @@ public final class ToolRegistry {
         register("goal_status", "Get the current persistent long-term goal status", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) ->
                 ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus("")));
 
-        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, gathering, foraging, mining, combat, building, sleep, lighting, farming, fishing, trading, breeding, and container work. Use dedicated craft, eat, and smelt tools for those actions. For exposed surface blocks use task_type=mine; for ore blocks matching *_ore use task_type=strip_mine with target_ores, because mine only scans nearby exposed blocks. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
+        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, gathering, foraging, mining, combat, building, sleep, lighting, farming, fishing, trading, breeding, and container work. Use dedicated craft, eat, and smelt tools for those actions. For exposed surface blocks use task_type=mine. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool which auto-locates the nearest ore and mines it directly — do NOT use strip_mine for getting ore. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
                 .property("task_type", stringSchema("move, gather, forage, attack, mine, strip_mine, mine_vein, build, sleep, light_area, farm, harvest, fish, trade, breed, follow, hold, guard, deposit, stockpile, or withdraw"))
                 .property("params", objectSchema().build())
                 .required("task_type")
@@ -586,8 +597,9 @@ public final class ToolRegistry {
             case "mine" -> {
                 Block block = blockWithAlias(params, "block", "block_type");
                 int count = optionalInt(params, "count", 1);
-                yield OreScan.isOreBlock(block) ? StripMineTask.forOre(block, count) : new MineTask(block, count);
+                yield OreScan.isOreBlock(block) ? new OreSeekTask(OreScan.oreFamily(block), count) : new MineTask(block, count);
             }
+            case "mine_ore" -> new OreSeekTask(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1));
             case "gather" -> new GatherQuotaTask(requiredItem(params, "item"), optionalInt(params, "count", 1));
             case "fish" -> new FishTask(optionalInt(params, "max_catches", 1), optionalInt(params, "max_ticks", 6000));
             case "trade" -> new TradeTask(optionalItem(params, "target_item"), optionalInt(params, "max_distance", 16));
@@ -872,6 +884,23 @@ public final class ToolRegistry {
                     .orElseThrow(() -> new IllegalArgumentException("unknown_block: " + id)));
         }
         return blocks;
+    }
+
+    // 把"矿石方块 id"或"原矿物品(raw_iron/iron_ore 等)"解析成目标矿石家族(含深板岩变体)。
+    private static java.util.Set<Block> oreTargetsFrom(String oreOrItem) {
+        Identifier id = Identifier.of(oreOrItem.trim());
+        Block block = Registries.BLOCK.getOptionalValue(id).orElse(null);
+        if (block != null && OreScan.isOreBlock(block)) {
+            return OreScan.oreFamily(block);
+        }
+        String path = id.getPath().replace("raw_", "");
+        for (String cand : new String[]{"minecraft:" + path + "_ore", "minecraft:" + path}) {
+            Block b = Registries.BLOCK.getOptionalValue(Identifier.of(cand)).orElse(null);
+            if (b != null && OreScan.isOreBlock(b)) {
+                return OreScan.oreFamily(b);
+            }
+        }
+        return OreScan.COMMON_ORES;
     }
 
     private static String escape(String value) {
