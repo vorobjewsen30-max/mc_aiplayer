@@ -280,7 +280,10 @@ public final class BrainCoordinator {
     }
 
     private void submit(AIPlayerEntity bot, BotConversation conversation) {
-        List<ChatMessage> historySnapshot = MemoryStore.INSTANCE.prepareHistory(bot, List.copyOf(conversation.history));
+        List<ChatMessage> historySnapshot;
+        synchronized (conversation) {
+            historySnapshot = MemoryStore.INSTANCE.prepareHistory(bot, List.copyOf(conversation.history));
+        }
         AIBotConfig.Brain brainConfig = AIBotConfig.get().brain();
         List<ToolDefinition> toolsSnapshot = toolRegistry.tools(
                 brainConfig,
@@ -293,6 +296,7 @@ public final class BrainCoordinator {
     private void scheduleContinuation(AIPlayerEntity bot, BotConversation conversation) {
         CompletableFuture.delayedExecutor(TpsGuard.INSTANCE.continuationDelaySeconds(), TimeUnit.SECONDS).execute(() ->
                 bot.getServer().execute(() -> {
+                synchronized (conversation) {
                     if (conversations.get(bot.getUuid()) != conversation || !conversation.busy) {
                         return;
                     }
@@ -335,6 +339,7 @@ public final class BrainCoordinator {
                     conversation.history.add(ChatMessage.user("Updated state after tool calls:\n" + snapshot.toJson()));
                     trimHistory(conversation);
                     submit(bot, conversation);
+                    }
                 }));
     }
 

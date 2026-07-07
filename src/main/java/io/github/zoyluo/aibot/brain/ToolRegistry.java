@@ -722,6 +722,9 @@ public final class ToolRegistry {
                 .build(), (bot, args) -> {
             String taskType = requiredString(args, "task_type");
             JsonObject params = args.getAsJsonObject("params");
+            if (params == null) {
+                throw new IllegalArgumentException("missing_params");
+            }
             if ("mine_ore".equals(taskType)) {
                 if (!AIBotConfig.get().goal().autoToolFillEnabled()) {
                     Task task = new OreDigTask(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1));

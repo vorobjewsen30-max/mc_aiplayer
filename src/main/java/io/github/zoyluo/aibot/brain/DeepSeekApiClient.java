@@ -205,6 +205,9 @@ public final class DeepSeekApiClient {
             }
             JsonObject choice = choices.get(0).getAsJsonObject();
             JsonObject message = choice.getAsJsonObject("message");
+            if (message == null) {
+                throw new DeepSeekApiException("bad_response: missing message in choice");
+            }
             String content = nullableString(message.get("content"));
             String finishReason = nullableString(choice.get("finish_reason"));
             List<ChatToolCall> toolCalls = new ArrayList<>();

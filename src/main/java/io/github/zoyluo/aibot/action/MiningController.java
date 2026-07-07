@@ -37,6 +37,7 @@ public final class MiningController {
         }
         if (targetState != null && !state.equals(targetState)) {
             resetProgress(player);
+            return ActionResult.SUCCESS;
         }
 
         LookAction.lookAtBlock(player, pos, face);
