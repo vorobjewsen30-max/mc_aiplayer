@@ -119,6 +119,10 @@ public final class ToolRegistry {
 
         register("move_to", "Pathfind to a coordinate. Falls back to straight-line walking if pathfinding fails.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
             BlockPos goal = blockPos(args);
+            // BUGFIX: anti-spam — не двигаться если уже рядом
+            if (bot.getBlockPos().getSquaredDistance(goal) <= 4.0D) {
+                return ok("already_at_destination");
+            }
             io.github.zoyluo.aibot.action.ActionResult pathResult = MovementAction.startPathTo(bot, goal);
             if (pathResult.isInProgress() || pathResult.isSuccess()) {
                 return ok("pathfinding_started");
@@ -136,7 +140,7 @@ public final class ToolRegistry {
             return ok("started");
         });
 
-        register("place_block", "Low-level manual placement of the currently held block at given coords. For crafting table placement during recipes, prefer craft because it can place a held crafting table automatically.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
+        register("place_block", "Place the held block at given coordinates. Automatically selects the right block from inventory.", xyzSchema(), (bot, args) -> {
             return result(BuildAction.placeBlockAt(bot, blockPos(args)));
         });
 
