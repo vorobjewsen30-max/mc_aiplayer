@@ -32,6 +32,7 @@ import io.github.zoyluo.aibot.task.FishTask;
 import io.github.zoyluo.aibot.task.FarmTask;
 import io.github.zoyluo.aibot.task.GatherQuotaTask;
 import io.github.zoyluo.aibot.task.FollowTask;
+import io.github.zoyluo.aibot.task.PvPTask;
 import io.github.zoyluo.aibot.task.GuardTask;
 import io.github.zoyluo.aibot.task.HoldTask;
 import io.github.zoyluo.aibot.task.LightAreaTask;
@@ -470,6 +471,14 @@ public final class ToolRegistry {
                     : GuardTask.player(playerName);
             TaskManager.INSTANCE.assign(bot, task);
             return ok("assigned: " + task.name());
+        });
+
+        register("kill_player", "Attack and kill a specific player by name. The bot will track, pursue, and fight the target player.", objectSchema()
+                .property("player_name", stringSchema("the name of the player to kill"))
+                .required("player_name")
+                .build(), (bot, args) -> {
+            TaskManager.INSTANCE.assign(bot, new PvPTask(requiredString(args, "player_name")));
+            return ok("pvp_task_assigned: hunting " + requiredString(args, "player_name"));
         });
 
         register("farm", "Till soil, plant crops, harvest mature crops, and optionally keep tending the area. Supported crops: wheat, carrot, potato.", objectSchema()

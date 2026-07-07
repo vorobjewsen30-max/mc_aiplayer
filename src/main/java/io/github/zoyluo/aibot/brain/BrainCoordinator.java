@@ -62,6 +62,12 @@ public final class BrainCoordinator {
             }
             BotLog.comm(bot, "goal_kept_on_user_message");
         }
+        // BUGFIX: прерываем текущую задачу, чтобы бот мог переключиться
+        var activeTask = TaskManager.INSTANCE.getActive(bot);
+        if (activeTask.isPresent() && !(activeTask.get() instanceof io.github.zoyluo.aibot.task.CombatTask)) {
+            TaskManager.INSTANCE.resetToIdle(bot);
+            bot.getActionPack().stopAll();
+        }
         synchronized (conversation) {
             if (conversation.busy) {
                 sendPanelChat(bot, "system", bot.getGameProfile().getName() + " 正在思考,请稍等。");
@@ -273,6 +279,14 @@ public final class BrainCoordinator {
 
     public void sendPanelChat(AIPlayerEntity bot, String role, String text) {
         AIBotServerNetworking.INSTANCE.sendBotChat(bot, role, text);
+        // BUGFIX: дублируем ответ LLM в игровой чат, чтобы все видели
+        if ("bot".equals(role)) {
+            var server = bot.getServer();
+            if (server != null) {
+                server.getPlayerManager().broadcast(net.minecraft.text.Text.literal(
+                        "<" + bot.getGameProfile().getName() + "> " + text), false);
+            }
+        }
     }
 
     public int conversationCount() {
