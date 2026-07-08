@@ -218,6 +218,10 @@ public final class ActionPack {
     }
 
     public ActionResult startMining(BlockPos pos, Direction face) {
+        // BUGFIX: остановить старый MiningController перед новым
+        if (this.mining != null) {
+            this.mining.abort(player);
+        }
         this.mining = new MiningController(pos, face);
         this.pathExecutor = null;
         this.forward = 0.0F;

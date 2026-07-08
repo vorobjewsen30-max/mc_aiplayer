@@ -60,7 +60,7 @@ public final class AStarPathfinder {
         this(world, start, goal, maxNodes, maxMillis, canPillar, true);
     }
     public AStarPathfinder(ServerWorld world, BlockPos start, BlockPos goal, int maxNodes, long maxMillis, boolean canPillar, boolean allowDig) {
-        this(world, start, goal, maxNodes, maxMillis, canPillar, allowDig, 3.0D);
+        this(world, start, goal, maxNodes, maxMillis, canPillar, allowDig, 1.0D);
     }
 
     // 带权构造(统一接近原语用 ε=3):见 heuristicWeight 注释。
