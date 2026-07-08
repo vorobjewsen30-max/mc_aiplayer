@@ -561,6 +561,13 @@ public final class DangerWatcher {
                     ? Threat.Severity.HIGH : Threat.Severity.MEDIUM;
             return Optional.of(new Threat(Threat.Type.HOSTILE, severity, mob, mob.getBlockPos()));
         }
+        // BUGFIX: игрок бьёт бота — тоже угроза
+        if (bot.hurtTime > 0) {
+            var src = bot.getRecentDamageSource();
+            if (src != null && src.getAttacker() instanceof net.minecraft.entity.player.PlayerEntity attacker) {
+                return Optional.of(new Threat(Threat.Type.HOSTILE, Threat.Severity.HIGH, attacker, attacker.getBlockPos()));
+            }
+        }
         if (bot.isSubmergedInWater() && bot.getAir() < 50) {
             return Optional.of(new Threat(Threat.Type.DROWNING, Threat.Severity.MEDIUM, null, bot.getBlockPos()));
         }
@@ -580,12 +587,10 @@ public final class DangerWatcher {
         return Optional.empty();
     }
 
-    // 怪物能否真正威胁到 bot:bot 眼睛 → 怪眼睛之间做一次方块 raycast,中间被实心方块挡住(非 MISS)即
-    // 视为够不到(隔墙/隔隧道)。raycast 只检测方块、不含实体,正好判断"有没有墙挡着"。近战怪没视线打不到、
-    // 远程怪没视线射不到、苦力怕没视线也炸不到——一律不算当前威胁(它们绕过来/露头后会被重新检测到)。
     private static boolean canReachThreat(AIPlayerEntity bot, LivingEntity mob) {
         return CombatCore.hasLineOfSight(bot, mob);
     }
+
 
     // 近处(8 格)是否有可达(有视线)的敌对怪。用于濒死封墙闸在 LOW_HP 抢占下补判——血<6 时 collectTopThreat
     // 已把 top 改写成 LOW_HP/entity=null,丢了 hostile 信息,这里独立扫一次还原"是否真被怪围"。复用同款视线判定。
@@ -601,3 +606,4 @@ public final class DangerWatcher {
         return false;
     }
 }
+
