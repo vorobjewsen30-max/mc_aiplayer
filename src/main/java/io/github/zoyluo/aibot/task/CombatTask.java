@@ -246,12 +246,17 @@ public final class CombatTask extends AbstractTask {
             noFoodCycleCount = 0;
         }
         if (target != null && target.isAlive()) {
-            Vec3d away = bot.getPos().subtract(target.getPos());
-            if (away.lengthSquared() < 0.01D) {
-                away = new Vec3d(1.0D, 0.0D, 0.0D);
+            // BUGFIX: не переключаться в HEAL пока не отойдём на 6+ блоков
+            double dist = bot.distanceTo(target);
+            if (dist < 6.0D) {
+                Vec3d away = bot.getPos().subtract(target.getPos());
+                if (away.lengthSquared() < 0.01D) {
+                    away = new Vec3d(1.0D, 0.0D, 0.0D);
+                }
+                Vec3d retreatTo = bot.getPos().add(away.normalize().multiply(12.0D));
+                bot.getActionPack().startWalkTo(retreatTo);
+                return; // остаёмся в RETREAT пока не отойдём
             }
-            Vec3d retreatTo = bot.getPos().add(away.normalize().multiply(8.0D));
-            bot.getActionPack().startWalkTo(retreatTo);
         } else {
             bot.getActionPack().stopMovement();
         }

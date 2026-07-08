@@ -104,7 +104,7 @@ public final class ToolRegistry {
     }
 
     private void registerDefaults() {
-        register("say", "Reply to the human in Simplified Chinese. The reply is shown in the AIBot panel.", objectSchema()
+        register("say", "Reply to the human in Russian. The reply is shown in the AIBot panel.", objectSchema()
                 .property("message", stringSchema("the text to say"))
                 .required("message")
                 .build(), (bot, args) -> {
@@ -1203,3 +1203,4 @@ public final class ToolRegistry {
         }
     }
 }
+

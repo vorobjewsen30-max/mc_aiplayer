@@ -283,7 +283,7 @@ public final class DangerWatcher {
         if (canFight(bot, threat, combat) && !combatStuck(bot)) {
             return new CombatTask(threat.entity().getType(), 1, combat.retreatHp());
         }
-        // Night shelter removed — bot fights instead
+        // Night shelter removed — bot fights instead (PVP path)
         return new EvadeTask(threat);
     }
 
@@ -601,5 +601,6 @@ public final class DangerWatcher {
         return false;
     }
 }
+
 
 
