@@ -72,7 +72,7 @@ public final class CombatTask extends AbstractTask {
     @Override
     protected void onStart(AIPlayerEntity bot) {
         CombatCore.equipMelee(bot);
-        EquipAction.equipShieldOffhand(bot);
+        EquipAction.equipBestOffhand(bot);
         phase = Phase.ACQUIRE;
     }
 
