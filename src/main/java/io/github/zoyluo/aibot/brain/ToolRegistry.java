@@ -150,6 +150,17 @@ public final class ToolRegistry {
                 .required("slot")
                 .build(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> result(InventoryAction.selectHotbar(bot, requiredInt(args, "slot"))));
 
+        register("select_item", "Equip an item from inventory to the main hand by its item id. For example: minecraft:chest, minecraft:crafting_table, minecraft:dirt. Use this BEFORE place_block if you need a specific item placed.", objectSchema()
+                .property("item", stringSchema("item id, for example minecraft:chest"))
+                .required("item")
+                .build(), (bot, args) -> {
+            if (io.github.zoyluo.aibot.action.BuildAction.equipItem(bot, requiredString(args, "item"))) {
+                return ok("equipped");
+            }
+            return fail("item_not_found_in_inventory");
+        });
+
+
         register("inventory", "Get the bot's current inventory", objectSchema().build(), (bot, args) ->
                 ok(InventoryAction.summarize(bot).toString()));
 
