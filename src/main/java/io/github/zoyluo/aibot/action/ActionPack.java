@@ -270,6 +270,8 @@ public final class ActionPack {
     }
 
     public void onUpdate() {
+        // BUGFIX: автоподбор дропа в радиусе 4 блоков, всегда, без ходьбы
+        io.github.zoyluo.aibot.action.HarvestCore.forcePickupNearbyAnyOf(player, null, 4.0D, 4.0D);
         tickPathExecutor();
         tickWalkTo();
         tickMining();
